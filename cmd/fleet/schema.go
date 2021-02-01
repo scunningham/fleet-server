@@ -43,14 +43,10 @@ const kFleetOutputRolesJSON = `
 			"names": [
 				"logs-*",
 				"metrics-*",
-				"events-*",
-				".ds-logs-*",
-				".ds-metrics-*",
-				".ds-events-*"
+				"events-*"
 			],
 			"privileges": [
-				"write",
-				"create_index",
+				"create_doc",
 				"indices:admin/auto_create"
 			]
 		}]
@@ -58,16 +54,6 @@ const kFleetOutputRolesJSON = `
 }
 `
 
-// Wrong: no AAD;
-// This defeats the signature check;
-// can copy from one to another and will dispatch.
-type AgentAction struct {
-	AgentId   string `json:"agent_id"`
-	Type      string `json:"type"`
-	SentAt    string `json:"sent_at"`
-	CreatedAt string `json:"created_at"`
-	Data      string `json:"data" saved:"encrypt"`
-}
 
 type EnrollRequest struct {
 	Type     string `json:"type"`
