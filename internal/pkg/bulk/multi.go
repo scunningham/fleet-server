@@ -68,12 +68,13 @@ func (b *Bulker) multiDispatch(ctx context.Context, action Action, opts optionsT
 	ch := make(chan respT, len(ops))
 
 	for i, op := range ops {
-		item := bulkT{
+		item := &bulkT{
 			i,
 			action,
 			ch,
-			op.Body,
+			*bytes.NewBuffer(op.Body),
 			opts,
+			nil,
 		}
 
 		// Dispatch to bulk Run loop
