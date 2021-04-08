@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/elastic/fleet-server/v7/internal/pkg/config"
@@ -66,13 +67,24 @@ type bulkT struct {
 	idx    int
 	action Action
 	ch     chan respT
-	data   []byte
+	data   bytes.Buffer
 	opts   optionsT
+	next   *bulkT
+}
+
+func (blk *bulkT) Reset() {
+	blk.idx = 0
+	blk.action = ""
+	blk.data.Reset()
+	blk.opts = optionsT{}
+	blk.next = nil
 }
 
 type Bulker struct {
 	es *elasticsearch.Client
-	ch chan bulkT
+	ch chan *bulkT
+
+	blkPool sync.Pool
 }
 
 const (
@@ -109,10 +121,17 @@ func InitES(ctx context.Context, cfg *config.Config, opts ...BulkOpt) (*elastics
 	return es, blk, nil
 }
 
+func newBlk() interface{} {
+	return &bulkT{
+		ch: make(chan respT, 1),
+	}
+}
+
 func NewBulker(es *elasticsearch.Client) *Bulker {
 	return &Bulker{
-		es: es,
-		ch: make(chan bulkT),
+		es:      es,
+		ch:      make(chan *bulkT),
+		blkPool: sync.Pool{New: newBlk},
 	}
 }
 
@@ -126,7 +145,6 @@ func (b *Bulker) parseBulkOpts(opts ...BulkOpt) bulkOptT {
 		flushThresholdCnt: defaultFlushThresholdCnt,
 		flushThresholdSz:  defaultFlushThresholdSz,
 		maxPending:        defaultMaxPending,
-		queuePrealloc:     defaultQueuePrealloc,
 	}
 
 	for _, f := range opts {
@@ -149,7 +167,8 @@ func stopTimer(t *time.Timer) {
 
 type queueT struct {
 	action  Action
-	queue   []bulkT
+	head    *bulkT
+	tail    *bulkT
 	pending int
 }
 
@@ -190,7 +209,6 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 
 		queues = append(queues, &queueT{
 			action: action,
-			queue:  make([]bulkT, 0, bopts.queuePrealloc),
 		})
 	}
 
@@ -201,12 +219,13 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 
 		for _, q := range queues {
 			if q.pending > 0 {
-				if err := b.flushQueue(ctx, w, q.queue, q.pending, q.action); err != nil {
+				if err := b.flushQueue(ctx, w, q.head, q.pending, q.action); err != nil {
 					return err
 				}
 
 				q.pending = 0
-				q.queue = make([]bulkT, 0, bopts.queuePrealloc)
+				q.head = nil
+				q.tail = nil
 			}
 		}
 
@@ -238,13 +257,25 @@ LOOP:
 				}
 			}
 
+			item.next = nil // safety check
+
 			q := queues[queueIdx]
-			q.queue = append(q.queue, item)
-			q.pending += len(item.data)
+			oldTail := q.tail
+			q.tail = item
+
+			if oldTail != nil {
+				oldTail.next = item
+			}
+
+			if q.head == nil {
+				q.head = item
+			}
+
+			q.pending += item.data.Len()
 
 			// Update threshold counters
 			itemCnt += 1
-			byteCnt += len(item.data)
+			byteCnt += item.data.Len()
 
 			// Start timer on first queued item
 			if itemCnt == 1 {
@@ -281,12 +312,11 @@ LOOP:
 	return err
 }
 
-func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue []bulkT, szPending int, action Action) error {
+func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *bulkT, szPending int, action Action) error {
 	start := time.Now()
 	log.Trace().
 		Str("mod", kModBulk).
 		Int("szPending", szPending).
-		Int("sz", len(queue)).
 		Str("action", action.Str()).
 		Msg("flushQueue Wait")
 
@@ -298,7 +328,6 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue []
 		Str("mod", kModBulk).
 		Dur("tdiff", time.Since(start)).
 		Int("szPending", szPending).
-		Int("sz", len(queue)).
 		Str("action", action.Str()).
 		Msg("flushQueue Acquired")
 
@@ -325,7 +354,6 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue []
 			Err(err).
 			Str("mod", kModBulk).
 			Int("szPending", szPending).
-			Int("sz", len(queue)).
 			Str("action", action.Str()).
 			Dur("rtt", time.Since(start)).
 			Msg("flushQueue Done")
@@ -335,15 +363,17 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue []
 	return nil
 }
 
-func (b *Bulker) flushRead(ctx context.Context, queue []bulkT, szPending int) error {
+func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) error {
 	start := time.Now()
 
 	buf := bytes.NewBufferString(rPrefix)
 	buf.Grow(szPending + len(rSuffix))
 
 	// Each item a JSON array element followed by comma
-	for _, item := range queue {
-		buf.Write(item.data)
+	queueCnt := 0
+	for n := queue; n != nil; n = n.next {
+		buf.Write(n.data.Bytes())
+		queueCnt += 1
 	}
 
 	// Need to strip the last element and append the suffix
@@ -381,31 +411,34 @@ func (b *Bulker) flushRead(ctx context.Context, queue []bulkT, szPending int) er
 		Int("sz", len(blk.Items)).
 		Msg("flushRead")
 
-	if len(blk.Items) != len(queue) {
+	if len(blk.Items) != queueCnt {
 		return fmt.Errorf("Mget queue length mismatch")
 	}
 
-	for i, item := range blk.Items {
+	n := queue
+	for _, item := range blk.Items {
 		citem := item
-		queue[i].ch <- respT{
-			idx:  queue[i].idx,
+		n.ch <- respT{
+			idx:  n.idx,
 			err:  item.deriveError(),
 			data: &citem,
 		}
-
+		n = n.next
 	}
 
 	return nil
 }
 
-func (b *Bulker) flushSearch(ctx context.Context, queue []bulkT, szPending int) error {
+func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) error {
 	start := time.Now()
 
 	buf := bytes.Buffer{}
 	buf.Grow(szPending)
 
-	for _, item := range queue {
-		buf.Write(item.data)
+	queueCnt := 0
+	for n := queue; n != nil; n = n.next {
+		buf.Write(n.data.Bytes())
+		queueCnt += 1
 	}
 
 	// Do actual bulk request; and send response on chan
@@ -440,34 +473,39 @@ func (b *Bulker) flushSearch(ctx context.Context, queue []bulkT, szPending int) 
 		Int("sz", len(blk.Responses)).
 		Msg("flushSearch")
 
-	if len(blk.Responses) != len(queue) {
+	if len(blk.Responses) != queueCnt {
 		return fmt.Errorf("Bulk queue length mismatch")
 	}
 
-	for i, response := range blk.Responses {
+	n := queue
+	for _, response := range blk.Responses {
 
 		cResponse := response
-		queue[i].ch <- respT{
-			idx:  queue[i].idx,
+		n.ch <- respT{
+			idx:  n.idx,
 			err:  response.deriveError(),
 			data: &cResponse,
 		}
+		n = n.next
 	}
 
 	return nil
 }
 
-func (b *Bulker) flushBulk(ctx context.Context, queue []bulkT, szPending int) error {
+func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) error {
 
 	buf := bytes.Buffer{}
 	buf.Grow(szPending)
 
 	doRefresh := "false"
-	for _, item := range queue {
-		buf.Write(item.data)
-		if item.opts.Refresh {
+
+	queueCnt := 0
+	for n := queue; n != nil; n = n.next {
+		buf.Write(n.data.Bytes())
+		if n.opts.Refresh {
 			doRefresh = "true"
 		}
+		queueCnt += 1
 	}
 
 	// Do actual bulk request; and send response on chan
@@ -507,17 +545,18 @@ func (b *Bulker) flushBulk(ctx context.Context, queue []bulkT, szPending int) er
 		Int("sz", len(blk.Items)).
 		Msg("flushBulk")
 
-	if len(blk.Items) != len(queue) {
+	if len(blk.Items) != queueCnt {
 		return fmt.Errorf("Bulk queue length mismatch")
 	}
 
-	for i, blkItem := range blk.Items {
+	n := queue
+	for _, blkItem := range blk.Items {
 
 		for _, item := range blkItem {
 
 			select {
-			case queue[i].ch <- respT{
-				idx:  queue[i].idx,
+			case n.ch <- respT{
+				idx:  n.idx,
 				err:  item.deriveError(),
 				data: &item,
 			}:
@@ -527,15 +566,16 @@ func (b *Bulker) flushBulk(ctx context.Context, queue []bulkT, szPending int) er
 
 			break
 		}
+		n = n.next
 	}
 
 	return nil
 }
 
-func failQueue(queue []bulkT, err error) {
-	for _, i := range queue {
-		i.ch <- respT{
-			idx: i.idx,
+func failQueue(queue *bulkT, err error) {
+	for n := queue; n != nil; n = n.next {
+		n.ch <- respT{
+			idx: n.idx,
 			err: err,
 		}
 	}
@@ -571,28 +611,41 @@ func (b *Bulker) Update(ctx context.Context, index, id string, body []byte, opts
 	return err
 }
 
+func (b *Bulker) GetBlk(action Action, opts optionsT) *bulkT {
+	blk := b.blkPool.Get().(*bulkT)
+	blk.action = action
+	blk.opts = opts
+	return blk
+}
+
+func (b *Bulker) PutBlk(blk *bulkT) {
+	blk.Reset()
+	b.blkPool.Put(blk)
+}
+
 func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
 	opt := b.parseOpts(opts...)
 
+	blk := b.GetBlk(action, opt)
+
 	// Serialize request
-	var buf bytes.Buffer
-
 	const kSlop = 64
-	buf.Grow(len(body) + kSlop)
+	blk.data.Grow(len(body) + kSlop)
 
-	if err := b.writeBulkMeta(&buf, action, index, id, opt); err != nil {
+	if err := b.writeBulkMeta(&blk.data, action, index, id, opt); err != nil {
 		return nil, err
 	}
 
-	if err := b.writeBulkBody(&buf, body); err != nil {
+	if err := b.writeBulkBody(&blk.data, body); err != nil {
 		return nil, err
 	}
 
 	// Dispatch and wait for response
-	resp := b.dispatch(ctx, action, opt, buf.Bytes())
+	resp := b.dispatch(ctx, blk)
 	if resp.err != nil {
 		return nil, resp.err
 	}
+	b.PutBlk(blk)
 
 	r := resp.data.(*BulkIndexerResponseItem)
 	return r, nil
@@ -601,21 +654,22 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id st
 func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error) {
 	opt := b.parseOpts(opts...)
 
+	blk := b.GetBlk(ActionRead, opt)
+
 	// Serialize request
-	var buf bytes.Buffer
-
 	const kSlop = 64
-	buf.Grow(kSlop)
+	blk.data.Grow(kSlop)
 
-	if err := b.writeMget(&buf, index, id); err != nil {
+	if err := b.writeMget(&blk.data, index, id); err != nil {
 		return nil, err
 	}
 
 	// Process response
-	resp := b.dispatch(ctx, ActionRead, opt, buf.Bytes())
+	resp := b.dispatch(ctx, blk)
 	if resp.err != nil {
 		return nil, resp.err
 	}
+	b.PutBlk(blk)
 
 	// Interpret response, looking for generated id
 	r := resp.data.(*MgetResponseItem)
@@ -625,25 +679,26 @@ func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byt
 func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts ...Opt) (*es.ResultT, error) {
 	opt := b.parseOpts(opts...)
 
+	blk := b.GetBlk(ActionSearch, opt)
+
 	// Serialize request
-	var buf bytes.Buffer
-
 	const kSlop = 64
-	buf.Grow(len(body) + kSlop)
+	blk.data.Grow(len(body) + kSlop)
 
-	if err := b.writeMsearchMeta(&buf, index); err != nil {
+	if err := b.writeMsearchMeta(&blk.data, index); err != nil {
 		return nil, err
 	}
 
-	if err := b.writeMsearchBody(&buf, body); err != nil {
+	if err := b.writeMsearchBody(&blk.data, body); err != nil {
 		return nil, err
 	}
 
 	// Process response
-	resp := b.dispatch(ctx, ActionSearch, opt, buf.Bytes())
+	resp := b.dispatch(ctx, blk)
 	if resp.err != nil {
 		return nil, resp.err
 	}
+	b.PutBlk(blk)
 
 	// Interpret response
 	r := resp.data.(*MsearchResponseItem)
@@ -758,28 +813,18 @@ func (b *Bulker) writeBulkBody(buf *bytes.Buffer, body []byte) error {
 	return b.validateBody(body)
 }
 
-func (b *Bulker) dispatch(ctx context.Context, action Action, opts optionsT, data []byte) respT {
+func (b *Bulker) dispatch(ctx context.Context, blk *bulkT) respT {
 	start := time.Now()
-
-	ch := make(chan respT, 1)
-
-	item := bulkT{
-		0,
-		action,
-		ch,
-		data,
-		opts,
-	}
 
 	// Dispatch to bulk Run loop
 	select {
-	case b.ch <- item:
+	case b.ch <- blk:
 	case <-ctx.Done():
 		log.Error().
 			Err(ctx.Err()).
 			Str("mod", kModBulk).
-			Str("action", action.Str()).
-			Bool("refresh", opts.Refresh).
+			Str("action", blk.action.Str()).
+			Bool("refresh", blk.opts.Refresh).
 			Dur("rtt", time.Since(start)).
 			Msg("Dispatch abort queue")
 		return respT{err: ctx.Err()}
@@ -787,11 +832,11 @@ func (b *Bulker) dispatch(ctx context.Context, action Action, opts optionsT, dat
 
 	// Wait for response
 	select {
-	case resp := <-ch:
+	case resp := <-blk.ch:
 		log.Trace().
 			Str("mod", kModBulk).
-			Str("action", action.Str()).
-			Bool("refresh", opts.Refresh).
+			Str("action", blk.action.Str()).
+			Bool("refresh", blk.opts.Refresh).
 			Dur("rtt", time.Since(start)).
 			Msg("Dispatch OK")
 
@@ -800,8 +845,8 @@ func (b *Bulker) dispatch(ctx context.Context, action Action, opts optionsT, dat
 		log.Error().
 			Err(ctx.Err()).
 			Str("mod", kModBulk).
-			Str("action", action.Str()).
-			Bool("refresh", opts.Refresh).
+			Str("action", blk.action.Str()).
+			Bool("refresh", blk.opts.Refresh).
 			Dur("rtt", time.Since(start)).
 			Msg("Dispatch abort response")
 	}
