@@ -95,7 +95,6 @@ const (
 	defaultFlushThresholdCnt = 32768
 	defaultFlushThresholdSz  = 1024 * 1024 * 10
 	defaultMaxPending        = 32
-	defaultQueuePrealloc     = 64
 )
 
 func InitES(ctx context.Context, cfg *config.Config, opts ...BulkOpt) (*elasticsearch.Client, Bulk, error) {
@@ -184,6 +183,8 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 	var err error
 
 	bopts := b.parseBulkOpts(opts...)
+
+	log.Info().Interface("opts", &bopts).Msg("Run bulker with options")
 
 	// Create timer in stopped state
 	timer := time.NewTimer(bopts.flushInterval)

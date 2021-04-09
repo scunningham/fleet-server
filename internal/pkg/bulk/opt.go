@@ -5,6 +5,7 @@
 package bulk
 
 import (
+	"github.com/rs/zerolog"
 	"time"
 )
 
@@ -68,4 +69,11 @@ func WithMaxPending(max int) BulkOpt {
 	return func(opt *bulkOptT) {
 		opt.maxPending = max
 	}
+}
+
+func (o *bulkOptT) MarshalZerologObject(e *zerolog.Event) {
+	e.Dur("flushInterval", o.flushInterval)
+	e.Int("flushThresholdCnt", o.flushThresholdCnt)
+	e.Int("flushThresholdSz", o.flushThresholdSz)
+	e.Int("maxPending", o.maxPending)
 }
