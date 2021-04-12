@@ -5,7 +5,6 @@
 package bulk
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,12 +16,11 @@ import (
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 
 	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
 
-type BulkOp struct {
+type MultiOp struct {
 	Id    string
 	Index string
 	Body  []byte
@@ -35,7 +33,7 @@ type Bulk interface {
 	Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error)
 	//	Delete (ctx context.Context, index, id string, opts ...Opt) error
 
-	MUpdate(ctx context.Context, ops []BulkOp, opts ...Opt) error
+	MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) error
 
 	Search(ctx context.Context, index []string, body []byte, opts ...Opt) (*es.ResultT, error)
 
@@ -58,26 +56,8 @@ const (
 const kModBulk = "bulk"
 
 type respT struct {
-	idx  int
 	err  error
 	data interface{}
-}
-
-type bulkT struct {
-	idx    int
-	action Action
-	ch     chan respT
-	data   bytes.Buffer
-	opts   optionsT
-	next   *bulkT
-}
-
-func (blk *bulkT) Reset() {
-	blk.idx = 0
-	blk.action = ""
-	blk.data.Reset()
-	blk.opts = optionsT{}
-	blk.next = nil
 }
 
 type Bulker struct {
@@ -118,12 +98,6 @@ func InitES(ctx context.Context, cfg *config.Config, opts ...BulkOpt) (*elastics
 	}()
 
 	return es, blk, nil
-}
-
-func newBlk() interface{} {
-	return &bulkT{
-		ch: make(chan respT, 1),
-	}
 }
 
 func NewBulker(es *elasticsearch.Client) *Bulker {
@@ -243,40 +217,40 @@ LOOP:
 
 		select {
 
-		case item := <-b.ch:
+		case blk := <-b.ch:
 
 			queueIdx := kQueueBulk
 
-			switch item.action {
+			switch blk.action {
 			case ActionRead:
 				queueIdx = kQueueRead
 			case ActionSearch:
 				queueIdx = kQueueSearch
 			default:
-				if item.opts.Refresh {
+				if blk.opts.Refresh {
 					queueIdx = kQueueRefresh
 				}
 			}
 
-			item.next = nil // safety check
+			blk.next = nil // safety check
 
 			q := queues[queueIdx]
 			oldTail := q.tail
-			q.tail = item
+			q.tail = blk
 
 			if oldTail != nil {
-				oldTail.next = item
+				oldTail.next = blk
 			}
 
 			if q.head == nil {
-				q.head = item
+				q.head = blk
 			}
 
-			q.pending += item.data.Len()
+			q.pending += blk.buf.Len()
 
 			// Update threshold counters
 			itemCnt += 1
-			byteCnt += item.data.Len()
+			byteCnt += blk.buf.Len()
 
 			// Start timer on first queued item
 			if itemCnt == 1 {
@@ -364,221 +338,13 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *b
 	return nil
 }
 
-func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) error {
-	start := time.Now()
-
-	buf := bytes.NewBufferString(rPrefix)
-	buf.Grow(szPending + len(rSuffix))
-
-	// Each item a JSON array element followed by comma
-	queueCnt := 0
-	for n := queue; n != nil; n = n.next {
-		buf.Write(n.data.Bytes())
-		queueCnt += 1
-	}
-
-	// Need to strip the last element and append the suffix
-	payload := buf.Bytes()
-	payload = append(payload[:len(payload)-1], []byte(rSuffix)...)
-
-	// Do actual bulk request; and send response on chan
-	req := esapi.MgetRequest{
-		Body: bytes.NewReader(payload),
-	}
-	res, err := req.Do(ctx, b.es)
-
-	if err != nil {
-		return err
-	}
-
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	if res.IsError() {
-		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
-	}
-
-	var blk MgetResponse
-	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(&blk); err != nil {
-		return fmt.Errorf("flush: error parsing response body: %s", err) // TODO: Wrap error
-	}
-
-	log.Trace().
-		Err(err).
-		Str("mod", kModBulk).
-		Dur("rtt", time.Since(start)).
-		Int("sz", len(blk.Items)).
-		Msg("flushRead")
-
-	if len(blk.Items) != queueCnt {
-		return fmt.Errorf("Mget queue length mismatch")
-	}
-
-	n := queue
-	for _, item := range blk.Items {
-		citem := item
-		n.ch <- respT{
-			idx:  n.idx,
-			err:  item.deriveError(),
-			data: &citem,
-		}
-		n = n.next
-	}
-
-	return nil
-}
-
-func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) error {
-	start := time.Now()
-
-	buf := bytes.Buffer{}
-	buf.Grow(szPending)
-
-	queueCnt := 0
-	for n := queue; n != nil; n = n.next {
-		buf.Write(n.data.Bytes())
-		queueCnt += 1
-	}
-
-	// Do actual bulk request; and send response on chan
-	req := esapi.MsearchRequest{
-		Body: bytes.NewReader(buf.Bytes()),
-	}
-	res, err := req.Do(ctx, b.es)
-
-	if err != nil {
-		return err
-	}
-
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	if res.IsError() {
-		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
-	}
-
-	var blk MsearchResponse
-	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(&blk); err != nil {
-		return fmt.Errorf("flush: error parsing response body: %s", err) // TODO: Wrap error
-	}
-
-	log.Trace().
-		Err(err).
-		Str("mod", kModBulk).
-		Dur("rtt", time.Since(start)).
-		Int("took", blk.Took).
-		Int("sz", len(blk.Responses)).
-		Msg("flushSearch")
-
-	if len(blk.Responses) != queueCnt {
-		return fmt.Errorf("Bulk queue length mismatch")
-	}
-
-	n := queue
-	for _, response := range blk.Responses {
-
-		cResponse := response
-		n.ch <- respT{
-			idx:  n.idx,
-			err:  response.deriveError(),
-			data: &cResponse,
-		}
-		n = n.next
-	}
-
-	return nil
-}
-
-func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) error {
-
-	buf := bytes.Buffer{}
-	buf.Grow(szPending)
-
-	doRefresh := "false"
-
-	queueCnt := 0
-	for n := queue; n != nil; n = n.next {
-		buf.Write(n.data.Bytes())
-		if n.opts.Refresh {
-			doRefresh = "true"
-		}
-		queueCnt += 1
-	}
-
-	// Do actual bulk request; and send response on chan
-	req := esapi.BulkRequest{
-		Body:    bytes.NewReader(buf.Bytes()),
-		Refresh: doRefresh,
-	}
-	res, err := req.Do(ctx, b.es)
-
-	if err != nil {
-		log.Error().Err(err).Str("mod", kModBulk).Msg("Fail req.Do")
-		return err
-	}
-
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	if res.IsError() {
-		log.Error().Str("mod", kModBulk).Str("err", res.String()).Msg("Fail result")
-		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
-	}
-
-	var blk BulkIndexerResponse
-	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(&blk); err != nil {
-		log.Error().Err(err).Str("mod", kModBulk).Msg("Decode error")
-		return fmt.Errorf("flush: error parsing response body: %s", err) // TODO: Wrap error
-	}
-
-	log.Trace().
-		Err(err).
-		Bool("refresh", doRefresh == "true").
-		Str("mod", kModBulk).
-		Int("took", blk.Took).
-		Bool("hasErrors", blk.HasErrors).
-		Int("sz", len(blk.Items)).
-		Msg("flushBulk")
-
-	if len(blk.Items) != queueCnt {
-		return fmt.Errorf("Bulk queue length mismatch")
-	}
-
-	n := queue
-	for _, blkItem := range blk.Items {
-
-		for _, item := range blkItem {
-
-			select {
-			case n.ch <- respT{
-				idx:  n.idx,
-				err:  item.deriveError(),
-				data: &item,
-			}:
-			default:
-				panic("Should not happen")
-			}
-
-			break
-		}
-		n = n.next
-	}
-
-	return nil
-}
-
 func failQueue(queue *bulkT, err error) {
-	for n := queue; n != nil; n = n.next {
+	for n := queue; n != nil; {
+		next := n.next // 'n' is invalid immediately on channel send
 		n.ch <- respT{
-			idx: n.idx,
 			err: err,
 		}
+		n = next
 	}
 }
 
@@ -590,40 +356,19 @@ func (b *Bulker) parseOpts(opts ...Opt) optionsT {
 	return opt
 }
 
-func (b *Bulker) Create(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error) {
-	item, err := b.waitBulkAction(ctx, ActionCreate, index, id, body, opts...)
-	if err != nil {
-		return "", err
-	}
-
-	return item.DocumentID, nil
-}
-
-func (b *Bulker) Index(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error) {
-	item, err := b.waitBulkAction(ctx, ActionIndex, index, id, body, opts...)
-	if err != nil {
-		return "", err
-	}
-	return item.DocumentID, nil
-}
-
-func (b *Bulker) Update(ctx context.Context, index, id string, body []byte, opts ...Opt) error {
-	_, err := b.waitBulkAction(ctx, ActionUpdate, index, id, body, opts...)
-	return err
-}
-
-func (b *Bulker) GetBlk(action Action, opts optionsT) *bulkT {
+func (b *Bulker) NewBlk(action Action, opts optionsT) *bulkT {
 	blk := b.blkPool.Get().(*bulkT)
 	blk.action = action
 	blk.opts = opts
 	return blk
 }
 
-func (b *Bulker) PutBlk(blk *bulkT) {
-	blk.Reset()
+func (b *Bulker) FreeBlk(blk *bulkT) {
+	blk.reset()
 	b.blkPool.Put(blk)
 }
 
+<<<<<<< HEAD
 func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
 	opt := b.parseOpts(opts...)
 
@@ -764,54 +509,6 @@ func (b *Bulker) validateBody(body []byte) error {
 	}
 
 	return nil
-}
-
-func (b *Bulker) writeMget(buf *bytes.Buffer, index, id string) error {
-	if err := b.validateMeta(index, id); err != nil {
-		return err
-	}
-
-	buf.WriteString(`{"_index":"`)
-	buf.WriteString(index)
-	buf.WriteString(`","_id":"`)
-	buf.WriteString(id)
-	buf.WriteString(`"},`)
-	return nil
-}
-
-func (b *Bulker) writeBulkMeta(buf *bytes.Buffer, action Action, index, id string, opts optionsT) error {
-	if err := b.validateMeta(index, id); err != nil {
-		return err
-	}
-
-	buf.WriteString(`{"`)
-	buf.WriteString(action.Str())
-	buf.WriteString(`":{`)
-	if id != "" {
-		buf.WriteString(`"_id":"`)
-		buf.WriteString(id)
-		buf.WriteString(`",`)
-	}
-	if opts.RetryOnConflict > 0 {
-		buf.WriteString(`"retry_on_conflict":`)
-		buf.WriteString(strconv.Itoa(opts.RetryOnConflict))
-		buf.WriteString(`,`)
-	}
-	buf.WriteString(`"_index":"`)
-	buf.WriteString(index)
-	buf.WriteString("\"}}\n")
-	return nil
-}
-
-func (b *Bulker) writeBulkBody(buf *bytes.Buffer, body []byte) error {
-	if body == nil {
-		return nil
-	}
-
-	buf.Write(body)
-	buf.WriteRune('\n')
-
-	return b.validateBody(body)
 }
 
 func (b *Bulker) dispatch(ctx context.Context, blk *bulkT) respT {

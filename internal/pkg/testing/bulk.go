@@ -42,7 +42,7 @@ func (m MockBulk) Read(ctx context.Context, index, id string, opts ...bulk.Opt) 
 	return nil, nil
 }
 
-func (m MockBulk) MUpdate(ctx context.Context, ops []bulk.BulkOp, opts ...bulk.Opt) error {
+func (m MockBulk) MUpdate(ctx context.Context, ops []bulk.MultiOp, opts ...bulk.Opt) error {
 	return nil
 }
 
