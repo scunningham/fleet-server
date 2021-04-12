@@ -89,7 +89,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 		return nil
 	}
 
-	updates := make([]bulk.BulkOp, 0, len(pending))
+	updates := make([]bulk.MultiOp, 0, len(pending))
 
 	for id, pendingData := range pending {
 		doc := pendingData.fields
@@ -106,7 +106,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			return err
 		}
 
-		updates = append(updates, bulk.BulkOp{
+		updates = append(updates, bulk.MultiOp{
 			Id:    id,
 			Body:  source,
 			Index: dl.FleetAgents,
