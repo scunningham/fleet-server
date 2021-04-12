@@ -26,7 +26,8 @@ func benchmarkUpdateN(n int, b *testing.B) {
 
 	go func() {
 		for v := range bulker.ch {
-		
+			bulker.bufPool.Put(v.buf)
+			v.buf = nil
 			v.ch <- respT{nil, nil}
 		}
 	}()
