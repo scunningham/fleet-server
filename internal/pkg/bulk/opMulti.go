@@ -5,9 +5,9 @@
 package bulk
 
 import (
+	"bytes"
 	"context"
-	"time"
-	"reflect"
+	//"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -20,25 +20,31 @@ func (b *Bulker) MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) error 
 func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
 	opt := b.parseOpts(opts...)
 
+	ch := make(chan respT, len(ops))
+
 	// Serialize requests
-	nops := make([]*bulkT, 0, len(ops))
+	nops := make([]bulkT, 0, len(ops))
 	for _, op := range ops {
 
-		blk := b.NewBlk(action, opt)
-
 		// Prealloc buffer
+		buf := b.bufPool.Get().(*bytes.Buffer)
 		const kSlop = 64
-		blk.buf.Grow(len(op.Body) + kSlop)
+		buf.Grow(len(op.Body) + kSlop)
 
-		if err := b.writeBulkMeta(&blk.buf, action, op.Index, op.Id); err != nil {
+		if err := b.writeBulkMeta(buf, action, op.Index, op.Id); err != nil {
 			return nil, err
 		}
 
-		if err := b.writeBulkBody(&blk.buf, op.Body); err != nil {
+		if err := b.writeBulkBody(buf, op.Body); err != nil {
 			return nil, err
 		}
 
-		nops = append(nops, blk)
+		nops = append(nops, bulkT{
+			action: action,
+			ch: ch,
+			buf: buf,		// NOT SURE THIS WORKS PROPERLY
+			opts: opt,
+		})
 	}
 
 	// Dispatch and wait for response
@@ -50,7 +56,9 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 	var lastErr error
 	items := make([]BulkIndexerResponseItem, len(resps))
 	for i, r := range resps {
-		b.FreeBlk(nops[i])
+		if nops[i].buf != nil {
+			b.bufPool.Put(nops[i].buf)
+		}
 
 		if r.err != nil {
 			log.Info().Err(r.err).Msg("Fail muliDispatch")
@@ -65,10 +73,42 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 	return items, lastErr
 }
 
-func (b *Bulker) multiDispatch(ctx context.Context, blks []*bulkT) ([]respT, error) {
-	start := time.Now()
+func (b *Bulker) multiDispatch(ctx context.Context, blks []bulkT) ([]respT, error) {
+	//start := time.Now()
 
 	var err error
+
+	// Iterate by reference
+	for i := range blks {
+		// Dispatch to bulk Run loop
+		select {
+		case b.ch <- &blks[i]:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	ch := blks[0].ch
+
+
+		// Wait for response
+	responses := make([]respT, 0, len(blks))
+
+LOOP:
+	for len(responses) < len(blks) {
+		select {
+		case resp := <-ch:
+			responses = append(responses, resp)
+		case <-ctx.Done():
+			err = ctx.Err()
+			responses = nil
+			break LOOP
+		}
+	}
+
+	return responses, err
+
+	/*
 
 	cases := make([]reflect.SelectCase, len(blks) + 1)
 
@@ -132,4 +172,34 @@ LOOP:
 		Msg("multiDispatch done")
 
 	return responses, err
+	*/
 }
+
+
+
+/*
+before blkPool
+
+cpu: Intel(R) Core(TM) i9-9980HK CPU @ 2.40GHz
+BenchmarkUpdate8-16       	  163479	      6986 ns/op	    2802 B/op	      15 allocs/op
+BenchmarkUpdate64-16      	  178108	      6985 ns/op	    2802 B/op	      15 allocs/op
+BenchmarkUpdate512-16     	  172149	      7008 ns/op	    2802 B/op	      15 allocs/op
+BenchmarkUpdate2K-16      	     883	   1328043 ns/op	  673004 B/op	    2061 allocs/op
+BenchmarkUpdate8K-16      	     205	   5588052 ns/op	 2703251 B/op	    8285 allocs/op
+BenchmarkUpdate32K-16     	      52	  22085310 ns/op	10978855 B/op	   34042 allocs/op
+BenchmarkUpdate128K-16    	      12	  88842438 ns/op	46890715 B/op	  152925 allocs/op
+
+*/
+
+/* after blk pool
+BenchmarkUpdate8-16       	  183309	      6372 ns/op	    3566 B/op	       7 allocs/op
+BenchmarkUpdate64-16      	  176274	      6434 ns/op	    3735 B/op	       7 allocs/op
+BenchmarkUpdate512-16     	  181476	      6363 ns/op	    3723 B/op	       7 allocs/op
+BenchmarkUpdate2K-16      	     838	   1232986 ns/op	  897387 B/op	      42 allocs/op
+BenchmarkUpdate8K-16      	     241	   4707331 ns/op	 3354837 B/op	     386 allocs/op
+BenchmarkUpdate32K-16     	      57	  19851519 ns/op	14042188 B/op	    5194 allocs/op
+BenchmarkUpdate128K-16    	      12	  89346973 ns/op	62825971 B/op	   76522 allocs/op
+*/
+
+
+

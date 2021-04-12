@@ -45,11 +45,11 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id st
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeBulkMeta(&blk.buf, action, index, id); err != nil {
+	if err := b.writeBulkMeta(blk.buf, action, index, id); err != nil {
 		return nil, err
 	}
 
-	if err := b.writeBulkBody(&blk.buf, body); err != nil {
+	if err := b.writeBulkBody(blk.buf, body); err != nil {
 		return nil, err
 	}
 
@@ -117,6 +117,9 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 	queueCnt := 0
 	for n := queue; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
+		b.blkPool.Put(n.buf)
+		n.buf = nil
+		
 		if n.opts.Refresh {
 			doRefresh = "true"
 		}
