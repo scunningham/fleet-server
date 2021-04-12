@@ -57,7 +57,9 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 			lastErr = r.err
 		}
 
-		items[i] = *r.data.(*BulkIndexerResponseItem)
+		if r.data != nil {
+			items[i] = *r.data.(*BulkIndexerResponseItem)
+		}
 	}
 
 	return items, lastErr

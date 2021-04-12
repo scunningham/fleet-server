@@ -55,10 +55,7 @@ const (
 
 const kModBulk = "bulk"
 
-type respT struct {
-	err  error
-	data interface{}
-}
+
 
 type Bulker struct {
 	es *elasticsearch.Client
