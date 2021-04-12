@@ -28,3 +28,8 @@ func newBlk() interface{} {
 		ch: make(chan respT, 1),
 	}
 }
+
+type respT struct {
+	err  error
+	data interface{}
+}
