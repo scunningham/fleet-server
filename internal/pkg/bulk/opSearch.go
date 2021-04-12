@@ -25,11 +25,11 @@ func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts .
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeMsearchMeta(&blk.buf, index); err != nil {
+	if err := b.writeMsearchMeta(blk.buf, index); err != nil {
 		return nil, err
 	}
 
-	if err := b.writeMsearchBody(&blk.buf, body); err != nil {
+	if err := b.writeMsearchBody(blk.buf, body); err != nil {
 		return nil, err
 	}
 
@@ -86,6 +86,9 @@ func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) e
 	queueCnt := 0
 	for n := queue; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
+		b.blkPool.Put(n.buf)
+		n.buf = nil
+
 		queueCnt += 1
 	}
 

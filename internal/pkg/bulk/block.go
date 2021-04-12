@@ -11,14 +11,14 @@ import (
 type bulkT struct {
 	action Action
 	ch     chan respT
-	buf    bytes.Buffer
+	buf    *bytes.Buffer
 	opts   optionsT
 	next   *bulkT
 }
 
 func (blk *bulkT) reset() {
 	blk.action = ""
-	blk.buf.Reset()
+	blk.buf = nil
 	blk.opts = optionsT{}
 	blk.next = nil
 }
@@ -26,6 +26,7 @@ func (blk *bulkT) reset() {
 func newBlk() interface{} {
 	return &bulkT{
 		ch: make(chan respT, 1),
+		buf: new(bytes.Buffer),
 	}
 }
 

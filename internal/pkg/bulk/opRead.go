@@ -24,7 +24,7 @@ func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byt
 	const kSlop = 64
 	blk.buf.Grow(kSlop)
 
-	if err := b.writeMget(&blk.buf, index, id); err != nil {
+	if err := b.writeMget(blk.buf, index, id); err != nil {
 		return nil, err
 	}
 
@@ -50,6 +50,8 @@ func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) err
 	queueCnt := 0
 	for n := queue; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
+		b.blkPool.Put(n.buf)
+		n.buf = nil
 		queueCnt += 1
 	}
 
