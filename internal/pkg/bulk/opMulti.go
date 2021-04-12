@@ -18,6 +18,10 @@ func (b *Bulker) MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) error 
 }
 
 func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
+	if len(ops) == 0 {
+		return nil, nil
+	}
+	
 	opt := b.parseOpts(opts...)
 
 	ch := make(chan respT, len(ops))
@@ -42,7 +46,7 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 		nops = append(nops, bulkT{
 			action: action,
 			ch: ch,
-			buf: buf,		// NOT SURE THIS WORKS PROPERLY
+			buf: buf,		
 			opts: opt,
 		})
 	}
