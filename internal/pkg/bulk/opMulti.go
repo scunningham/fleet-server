@@ -5,7 +5,6 @@
 package bulk
 
 import (
-	"bytes"
 	"context"
 	//"time"
 
@@ -26,27 +25,38 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 
 	ch := make(chan respT, len(ops))
 
+	// O(n) Determine how much space we need
+	var cnt int
+	for i := range ops {
+		const kSlop = 64
+		cnt += len(ops[i].Body) + kSlop
+	}
+
+	// Create one bulk buffer to serialize each piece. 
+	// This decreases the number of heap objects necessary.
+	var bulkBuf Buf
+	bulkBuf.Grow(cnt)
+
 	// Serialize requests
 	nops := make([]bulkT, 0, len(ops))
-	for _, op := range ops {
+	for i := range ops {
 
-		// Prealloc buffer
-		buf := b.bufPool.Get().(*bytes.Buffer)
-		const kSlop = 64
-		buf.Grow(len(op.Body) + kSlop)
+		bufIdx := bulkBuf.Len()
 
-		if err := b.writeBulkMeta(buf, action, op.Index, op.Id); err != nil {
+		op := &ops[i]
+
+		if err := b.writeBulkMeta(&bulkBuf, action, op.Index, op.Id); err != nil {
 			return nil, err
 		}
 
-		if err := b.writeBulkBody(buf, op.Body); err != nil {
+		if err := b.writeBulkBody(&bulkBuf, op.Body); err != nil {
 			return nil, err
 		}
 
 		nops = append(nops, bulkT{
 			action: action,
 			ch: ch,
-			buf: buf,		
+			buf: Buf{buf: bulkBuf.buf[bufIdx:]},		
 			opts: opt,
 		})
 	}
@@ -60,9 +70,6 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 	var lastErr error
 	items := make([]BulkIndexerResponseItem, len(resps))
 	for i, r := range resps {
-		if nops[i].buf != nil {
-			b.bufPool.Put(nops[i].buf)
-		}
 
 		if r.err != nil {
 			log.Info().Err(r.err).Msg("Fail muliDispatch")

@@ -5,7 +5,6 @@
 package bulk
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -63,7 +62,6 @@ type Bulker struct {
 	ch chan *bulkT
 
 	blkPool sync.Pool
-	bufPool sync.Pool
 }
 
 const (
@@ -104,7 +102,6 @@ func NewBulker(es *elasticsearch.Client) *Bulker {
 	return &Bulker{
 		es:      es,
 		ch:      make(chan *bulkT),
-		bufPool: sync.Pool{New: func() interface{} { return new(bytes.Buffer) }},
 		blkPool: sync.Pool{New: func() interface{} { return &bulkT{ch: make(chan respT, 1)}}},
 	}
 }
@@ -359,17 +356,12 @@ func (b *Bulker) parseOpts(opts ...Opt) optionsT {
 
 func (b *Bulker) NewBlk(action Action, opts optionsT) *bulkT {
 	blk := b.blkPool.Get().(*bulkT)
-	blk.buf = b.bufPool.Get().(*bytes.Buffer)
 	blk.action = action
 	blk.opts = opts
 	return blk
 }
 
 func (b *Bulker) FreeBlk(blk *bulkT) {
-	if blk.buf != nil {
-		b.bufPool.Put(blk.buf)
-		blk.buf = nil
-	}
 	blk.reset()
 	b.blkPool.Put(blk)
 }
