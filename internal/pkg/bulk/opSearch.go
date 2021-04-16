@@ -25,11 +25,11 @@ func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts .
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeMsearchMeta(blk.buf, index); err != nil {
+	if err := b.writeMsearchMeta(&blk.buf, index); err != nil {
 		return nil, err
 	}
 
-	if err := b.writeMsearchBody(blk.buf, body); err != nil {
+	if err := b.writeMsearchBody(&blk.buf, body); err != nil {
 		return nil, err
 	}
 
@@ -45,7 +45,7 @@ func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts .
 	return &es.ResultT{HitsT: r.Hits, Aggregations: r.Aggregations}, nil
 }
 
-func (b *Bulker) writeMsearchMeta(buf *bytes.Buffer, indices []string) error {
+func (b *Bulker) writeMsearchMeta(buf *Buf, indices []string) error {
 	if err := b.validateIndices(indices); err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (b *Bulker) writeMsearchMeta(buf *bytes.Buffer, indices []string) error {
 	return nil
 }
 
-func (b *Bulker) writeMsearchBody(buf *bytes.Buffer, body []byte) error {
+func (b *Bulker) writeMsearchBody(buf *Buf, body []byte) error {
 	buf.Write(body)
 	buf.WriteRune('\n')
 
@@ -86,8 +86,6 @@ func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) e
 	queueCnt := 0
 	for n := queue; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
-		b.blkPool.Put(n.buf)
-		n.buf = nil
 
 		queueCnt += 1
 	}

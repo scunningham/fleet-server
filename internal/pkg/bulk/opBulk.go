@@ -45,11 +45,11 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id st
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeBulkMeta(blk.buf, action, index, id); err != nil {
+	if err := b.writeBulkMeta(&blk.buf, action, index, id); err != nil {
 		return nil, err
 	}
 
-	if err := b.writeBulkBody(blk.buf, body); err != nil {
+	if err := b.writeBulkBody(&blk.buf, body); err != nil {
 		return nil, err
 	}
 
@@ -64,7 +64,7 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id st
 	return r, nil
 }
 
-func (b *Bulker) writeMget(buf *bytes.Buffer, index, id string) error {
+func (b *Bulker) writeMget(buf *Buf, index, id string) error {
 	if err := b.validateMeta(index, id); err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func (b *Bulker) writeMget(buf *bytes.Buffer, index, id string) error {
 	return nil
 }
 
-func (b *Bulker) writeBulkMeta(buf *bytes.Buffer, action Action, index, id string) error {
+func (b *Bulker) writeBulkMeta(buf *Buf, action Action, index, id string) error {
 	if err := b.validateMeta(index, id); err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (b *Bulker) writeBulkMeta(buf *bytes.Buffer, action Action, index, id strin
 	return nil
 }
 
-func (b *Bulker) writeBulkBody(buf *bytes.Buffer, body []byte) error {
+func (b *Bulker) writeBulkBody(buf *Buf, body []byte) error {
 	if body == nil {
 		return nil
 	}
@@ -117,8 +117,6 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 	queueCnt := 0
 	for n := queue; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
-		b.blkPool.Put(n.buf)
-		n.buf = nil
 		
 		if n.opts.Refresh {
 			doRefresh = "true"

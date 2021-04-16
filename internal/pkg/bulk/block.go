@@ -5,20 +5,19 @@
 package bulk
 
 import (
-	"bytes"
 )
 
 type bulkT struct {
 	action Action
 	ch     chan respT
-	buf    *bytes.Buffer
+	buf    Buf
 	opts   optionsT
 	next   *bulkT
 }
 
 func (blk *bulkT) reset() {
 	blk.action = ""
-	blk.buf = nil
+	blk.buf.Reset()
 	blk.opts = optionsT{}
 	blk.next = nil
 }
@@ -26,7 +25,6 @@ func (blk *bulkT) reset() {
 func newBlk() interface{} {
 	return &bulkT{
 		ch: make(chan respT, 1),
-		buf: new(bytes.Buffer),
 	}
 }
 
