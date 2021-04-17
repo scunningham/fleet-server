@@ -45,7 +45,7 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id st
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeBulkMeta(&blk.buf, action, index, id); err != nil {
+	if err := b.writeBulkMeta(&blk.buf, action.Str(), index, id); err != nil {
 		return nil, err
 	}
 
@@ -77,13 +77,13 @@ func (b *Bulker) writeMget(buf *Buf, index, id string) error {
 	return nil
 }
 
-func (b *Bulker) writeBulkMeta(buf *Buf, action Action, index, id string) error {
+func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id string) error {
 	if err := b.validateMeta(index, id); err != nil {
 		return err
 	}
 
 	buf.WriteString(`{"`)
-	buf.WriteString(action.Str())
+	buf.WriteString(action)
 	buf.WriteString(`":{`)
 	if id != "" {
 		buf.WriteString(`"_id":"`)
@@ -98,13 +98,36 @@ func (b *Bulker) writeBulkMeta(buf *Buf, action Action, index, id string) error 
 }
 
 func (b *Bulker) writeBulkBody(buf *Buf, body []byte) error {
-	if body == nil {
+	if len(body) == 0 {
 		return nil
 	}
+
+	if err := b.validateBody(body); err != nil {
+		return err
+	}
+
 	buf.Write(body)
 	buf.WriteRune('\n')
+	return nil
+}
 
-	return b.validateBody(body)
+func (b *Bulker) calcBulkSz(action, idx, id string, body []byte) int {
+	const kFraming = 19
+	metaSz := kFraming + len(action) + len(idx) 
+
+	var idSz int
+	if id != "" {
+		const kIdFraming = 9
+		idSz = kIdFraming + len(id)
+	}
+
+	var bodySz int
+	if len(body) != 0 {
+		const kBodyFraming = 1
+		bodySz = kBodyFraming + len(body)
+	}
+
+	return metaSz + idSz + bodySz
 }
 
 func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) error {
