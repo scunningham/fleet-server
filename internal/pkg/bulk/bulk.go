@@ -101,7 +101,7 @@ func NewBulker(es *elasticsearch.Client) *Bulker {
 
 	return &Bulker{
 		es:      es,
-		ch:      make(chan *bulkT),
+		ch:      make(chan *bulkT, 32),
 		blkPool: sync.Pool{New: func() interface{} { return &bulkT{ch: make(chan respT, 1)}}},
 	}
 }

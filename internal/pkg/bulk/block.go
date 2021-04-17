@@ -8,6 +8,7 @@ import (
 )
 
 type bulkT struct {
+	idx    int
 	action Action
 	ch     chan respT
 	buf    Buf

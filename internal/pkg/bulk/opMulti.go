@@ -25,11 +25,13 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 
 	ch := make(chan respT, len(ops))
 
+
+	actionStr := action.Str()
+
 	// O(n) Determine how much space we need
 	var cnt int
-	for i := range ops {
-		const kSlop = 64
-		cnt += len(ops[i].Body) + kSlop
+	for _, op := range ops {
+		cnt += b.calcBulkSz(actionStr, op.Index, op.Id, op.Body)
 	}
 
 	// Create one bulk buffer to serialize each piece. 
@@ -38,14 +40,14 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 	bulkBuf.Grow(cnt)
 
 	// Serialize requests
-	nops := make([]bulkT, 0, len(ops))
+	nops := make([]bulkT, len(ops))
 	for i := range ops {
 
 		bufIdx := bulkBuf.Len()
 
 		op := &ops[i]
 
-		if err := b.writeBulkMeta(&bulkBuf, action, op.Index, op.Id); err != nil {
+		if err := b.writeBulkMeta(&bulkBuf, actionStr, op.Index, op.Id); err != nil {
 			return nil, err
 		}
 
@@ -53,33 +55,58 @@ func (b *Bulker) multiWaitBulkAction(ctx context.Context, action Action, ops []M
 			return nil, err
 		}
 
-		nops = append(nops, bulkT{
-			action: action,
-			ch: ch,
-			buf: Buf{buf: bulkBuf.buf[bufIdx:]},		
-			opts: opt,
-		})
+		nop := &nops[i]
+		nop.ch = ch
+		nop.idx = i
+		nop.opts = opt
+		nop.action = action
+		nop.buf.buf = bulkBuf.buf[bufIdx:]
 	}
 
+/*
 	// Dispatch and wait for response
 	resps, err := b.multiDispatch(ctx, nops)
 	if err != nil {
 		return nil, err
 	}
+*/
 
-	var lastErr error
-	items := make([]BulkIndexerResponseItem, len(resps))
-	for i, r := range resps {
-
-		if r.err != nil {
-			log.Info().Err(r.err).Msg("Fail muliDispatch")
-			lastErr = r.err
-		}
-
-		if r.data != nil {
-			items[i] = *r.data.(*BulkIndexerResponseItem)
+	for i := range nops {
+		select {
+		case b.ch <- &nops[i]:
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
+
+
+	var lastErr error
+	items := make([]BulkIndexerResponseItem, len(ops))
+
+
+	// Wait for responses
+	var i int
+
+	for i < len(items) {
+		select {
+		case r := <-ch:
+			if r.err != nil {
+				log.Info().Err(r.err).Msg("Fail muliDispatch")
+				lastErr = r.err
+			}
+
+			// fix up index here, this is not right
+			if r.data != nil { 
+				items[i] = *r.data.(*BulkIndexerResponseItem)
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
+		i += 1
+	}
+
+
 
 	return items, lastErr
 }

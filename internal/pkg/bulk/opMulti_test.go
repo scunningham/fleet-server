@@ -3,7 +3,7 @@ package bulk
 import (
 	"testing"
 	"context"
-	"strconv"
+	//"strconv"
 
 	"github.com/rs/zerolog"
 )
@@ -30,14 +30,16 @@ func benchmarkUpdateN(n int, b *testing.B) {
 		}
 	}()
 
+	body := []byte(payload)
+
 	// Create the ops
 
-	var ops []MultiOp
+	ops := make([]MultiOp, 0, n)
 	for i := 0; i < n; i++ {
 		ops = append(ops, MultiOp{
-			Id: strconv.Itoa(i),
+			Id: "abba",
 			Index: "bogus",
-			Body: []byte(payload),
+			Body: body,
 		})
 	}
 
