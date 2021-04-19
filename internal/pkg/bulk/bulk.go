@@ -32,11 +32,16 @@ type Bulk interface {
 	Create(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
 	Index(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
 	Update(ctx context.Context, index, id string, body []byte, opts ...Opt) error
+	Delete(ctx context.Context, index, id string, opts ...Opt) error
 	Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error)
-	Search(ctx context.Context, index []string, body []byte, opts ...Opt) (*es.ResultT, error)
+	Search(ctx context.Context, index string, body []byte, opts ...Opt) (*es.ResultT, error)
 
 	// Multi Operation API's run in the bulk engine
+	MCreate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
+	MIndex(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
 	MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
+	MDelete(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
+
 
 	// Accessor used to talk to elastic search direcly bypassing bulk engine
 	Client() *elasticsearch.Client

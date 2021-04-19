@@ -16,7 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts ...Opt) (*es.ResultT, error) {
+func (b *Bulker) Search(ctx context.Context, index string, body []byte, opts ...Opt) (*es.ResultT, error) {
 	opt := b.parseOpts(opts...)
 
 	blk := b.NewBlk(ActionSearch, opt)
@@ -25,7 +25,7 @@ func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts .
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeMsearchMeta(&blk.buf, index); err != nil {
+	if err := b.writeMsearchMeta(&blk.buf, index, opt.Indices); err != nil {
 		return nil, err
 	}
 
@@ -45,19 +45,19 @@ func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts .
 	return &es.ResultT{HitsT: r.Hits, Aggregations: r.Aggregations}, nil
 }
 
-func (b *Bulker) writeMsearchMeta(buf *Buf, indices []string) error {
-	if err := b.validateIndices(indices); err != nil {
+func (b *Bulker) writeMsearchMeta(buf *Buf, index string, moreIndices []string) error {
+	if err := b.validateIndex(index); err != nil {
 		return err
 	}
 
-	switch len(indices) {
-	case 0:
-		buf.WriteString("{ }\n")
-	case 1:
-		buf.WriteString(`{"index": "`)
-		buf.WriteString(indices[0])
-		buf.WriteString("\"}\n")
-	default:
+	if len(moreIndices) > 0 {
+		if err := b.validateIndices(moreIndices); err != nil {
+			return err
+		}
+
+		indices := []string{index}
+		indices = append(indices, moreIndices...)
+
 		buf.WriteString(`{"index": `)
 		if d, err := json.Marshal(indices); err != nil {
 			return err
@@ -65,6 +65,12 @@ func (b *Bulker) writeMsearchMeta(buf *Buf, indices []string) error {
 			buf.Write(d)
 		}
 		buf.WriteString("}\n")
+	} else if len(index) == 0 {
+		buf.WriteString("{ }\n")
+	} else {
+		buf.WriteString(`{"index": "`)
+		buf.WriteString(index)
+		buf.WriteString("\"}\n")
 	}
 
 	return nil

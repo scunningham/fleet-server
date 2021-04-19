@@ -36,8 +36,8 @@ func (b *Bulker) Update(ctx context.Context, index, id string, body []byte, opts
 	return err
 }
 
-func (b *Bulker) Delete(ctx context.Context, index, id string, body []byte, opts ...Opt) error {
-	_, err := b.waitBulkAction(ctx, ActionDelete, index, id, body, opts...)
+func (b *Bulker) Delete(ctx context.Context, index, id string, opts ...Opt) error {
+	_, err := b.waitBulkAction(ctx, ActionDelete, index, id, nil, opts...)
 	return err
 }
 
