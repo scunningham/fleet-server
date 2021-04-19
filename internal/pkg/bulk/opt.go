@@ -15,6 +15,7 @@ import (
 type optionsT struct {
 	Refresh         bool
 	RetryOnConflict int
+	Indices []string
 }
 
 type Opt func(*optionsT)
@@ -28,6 +29,11 @@ func WithRefresh() Opt {
 func WithRetryOnConflict(n int) Opt {
 	return func(opt *optionsT) {
 		opt.RetryOnConflict = n
+
+// Applicable to search
+func WithIndex(idx string) Opt {
+	return func(opt *optionsT) {
+		opt.Indices = append(opt.Indices, idx)
 	}
 }
 

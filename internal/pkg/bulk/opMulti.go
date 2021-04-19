@@ -8,9 +8,22 @@ import (
 	"context"
 )
 
+func (b *Bulker) MCreate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
+	return b.multiWaitBulkOp(ctx, ActionCreate, ops)
+}
+
+func (b *Bulker) MIndex(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
+	return b.multiWaitBulkOp(ctx, ActionIndex, ops)
+}
+
 func (b *Bulker) MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
 	return b.multiWaitBulkOp(ctx, ActionUpdate, ops)
 }
+
+func (b *Bulker) MDelete(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
+	return b.multiWaitBulkOp(ctx, ActionDelete, ops)
+}
+
 
 func (b *Bulker) multiWaitBulkOp(ctx context.Context, action Action, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
 	if len(ops) == 0 {
