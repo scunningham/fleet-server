@@ -54,8 +54,8 @@ func benchmarkUpdateN(n int, b *testing.B) {
 }
 
 func BenchmarkUpdate8(b *testing.B)    { benchmarkUpdateN(8, b) }
-func BenchmarkUpdate64(b *testing.B)   { benchmarkUpdateN(8, b) }
-func BenchmarkUpdate512(b *testing.B)  { benchmarkUpdateN(8, b) }
+func BenchmarkUpdate64(b *testing.B)   { benchmarkUpdateN(64, b) }
+func BenchmarkUpdate512(b *testing.B)  { benchmarkUpdateN(512, b) }
 func BenchmarkUpdate2K(b *testing.B)   { benchmarkUpdateN(2048, b) }
 func BenchmarkUpdate8K(b *testing.B)   { benchmarkUpdateN(8192, b) }
 func BenchmarkUpdate32K(b *testing.B)  { benchmarkUpdateN(32768, b) }
