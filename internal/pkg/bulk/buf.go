@@ -4,18 +4,17 @@ import (
 	"unicode/utf8"
 )
 
+// Effectively golang's string builder with a Reset option
 
 type Buf struct {
-	buf  []byte
+	buf []byte
 }
-
 
 func (b *Buf) Bytes() []byte {
 	return b.buf
 }
 
 func (b *Buf) Len() int { return len(b.buf) }
-
 
 func (b *Buf) Cap() int { return cap(b.buf) }
 

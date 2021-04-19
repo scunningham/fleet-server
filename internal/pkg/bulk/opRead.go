@@ -98,6 +98,7 @@ func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) err
 		citem := item
 		n.ch <- respT{
 			err:  item.deriveError(),
+			idx:  n.idx,
 			data: &citem,
 		}
 		n = next

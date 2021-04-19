@@ -1,15 +1,14 @@
 package bulk
 
 import (
-	"testing"
 	"context"
+	"testing"
 	//"strconv"
 
 	"github.com/rs/zerolog"
 )
 
 const payload = `{"_id" : "1", "_index" : "test"}`
-
 
 func benchmarkUpdateN(n int, b *testing.B) {
 
@@ -19,7 +18,6 @@ func benchmarkUpdateN(n int, b *testing.B) {
 	defer zerolog.SetGlobalLevel(l)
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-
 
 	bulker := NewBulker(nil)
 	defer close(bulker.ch)
@@ -37,32 +35,26 @@ func benchmarkUpdateN(n int, b *testing.B) {
 	ops := make([]MultiOp, 0, n)
 	for i := 0; i < n; i++ {
 		ops = append(ops, MultiOp{
-			Id: "abba",
+			Id:    "abba",
 			Index: "bogus",
-			Body: body,
+			Body:  body,
 		})
 	}
 
-
 	ctx := context.Background()
 
-    for i := 0; i < b.N; i++ {
-        bulker.MUpdate(ctx, ops)
-    }
+	for i := 0; i < b.N; i++ {
+		bulker.MUpdate(ctx, ops)
+	}
 }
 
-func BenchmarkUpdate8(b *testing.B) { benchmarkUpdateN(8, b) }
-func BenchmarkUpdate64(b *testing.B) { benchmarkUpdateN(8, b) }
-func BenchmarkUpdate512(b *testing.B) { benchmarkUpdateN(8, b) }
-func BenchmarkUpdate2K(b *testing.B) { benchmarkUpdateN(2048, b) }
-func BenchmarkUpdate8K(b *testing.B) { benchmarkUpdateN(8192, b) }
-func BenchmarkUpdate32K(b *testing.B) { benchmarkUpdateN(32768, b) }
+func BenchmarkUpdate8(b *testing.B)    { benchmarkUpdateN(8, b) }
+func BenchmarkUpdate64(b *testing.B)   { benchmarkUpdateN(8, b) }
+func BenchmarkUpdate512(b *testing.B)  { benchmarkUpdateN(8, b) }
+func BenchmarkUpdate2K(b *testing.B)   { benchmarkUpdateN(2048, b) }
+func BenchmarkUpdate8K(b *testing.B)   { benchmarkUpdateN(8192, b) }
+func BenchmarkUpdate32K(b *testing.B)  { benchmarkUpdateN(32768, b) }
 func BenchmarkUpdate128K(b *testing.B) { benchmarkUpdateN(131072, b) }
-
-
-
-
-
 
 /*
 pkg: github.com/elastic/fleet-server/v7/internal/pkg/bulk

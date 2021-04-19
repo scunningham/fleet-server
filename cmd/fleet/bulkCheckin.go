@@ -113,7 +113,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 		})
 	}
 
-	err := bc.bulker.MUpdate(ctx, updates, bulk.WithRefresh())
+	_, err := bc.bulker.MUpdate(ctx, updates, bulk.WithRefresh())
 	log.Trace().
 		Err(err).
 		Dur("rtt", time.Since(start)).
