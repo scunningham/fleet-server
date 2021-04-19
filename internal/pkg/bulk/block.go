@@ -4,8 +4,7 @@
 
 package bulk
 
-import (
-)
+import ()
 
 type bulkT struct {
 	idx    int
@@ -31,5 +30,6 @@ func newBlk() interface{} {
 
 type respT struct {
 	err  error
+	idx  int
 	data interface{}
 }

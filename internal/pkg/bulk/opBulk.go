@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/elastic/go-elasticsearch/v8/esapi"	
+	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,6 +33,11 @@ func (b *Bulker) Index(ctx context.Context, index, id string, body []byte, opts 
 
 func (b *Bulker) Update(ctx context.Context, index, id string, body []byte, opts ...Opt) error {
 	_, err := b.waitBulkAction(ctx, ActionUpdate, index, id, body, opts...)
+	return err
+}
+
+func (b *Bulker) Delete(ctx context.Context, index, id string, body []byte, opts ...Opt) error {
+	_, err := b.waitBulkAction(ctx, ActionDelete, index, id, body, opts...)
 	return err
 }
 
@@ -113,7 +118,7 @@ func (b *Bulker) writeBulkBody(buf *Buf, body []byte) error {
 
 func (b *Bulker) calcBulkSz(action, idx, id string, body []byte) int {
 	const kFraming = 19
-	metaSz := kFraming + len(action) + len(idx) 
+	metaSz := kFraming + len(action) + len(idx)
 
 	var idSz int
 	if id != "" {
@@ -140,7 +145,7 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 	queueCnt := 0
 	for n := queue; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
-		
+
 		if n.opts.Refresh {
 			doRefresh = "true"
 		}
@@ -197,6 +202,7 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 			select {
 			case n.ch <- respT{
 				err:  item.deriveError(),
+				idx:  n.idx,
 				data: &item,
 			}:
 			default:

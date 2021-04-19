@@ -27,16 +27,18 @@ type MultiOp struct {
 }
 
 type Bulk interface {
+
+	// Synchronous operations run in the bulk engine
 	Create(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
 	Index(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
 	Update(ctx context.Context, index, id string, body []byte, opts ...Opt) error
 	Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error)
-	//	Delete (ctx context.Context, index, id string, opts ...Opt) error
-
-	MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) error
-
 	Search(ctx context.Context, index []string, body []byte, opts ...Opt) (*es.ResultT, error)
 
+	// Multi Operation API's run in the bulk engine
+	MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
+
+	// Accessor used to talk to elastic search direcly bypassing bulk engine
 	Client() *elasticsearch.Client
 }
 
@@ -54,8 +56,6 @@ const (
 )
 
 const kModBulk = "bulk"
-
-
 
 type Bulker struct {
 	es *elasticsearch.Client
@@ -102,7 +102,7 @@ func NewBulker(es *elasticsearch.Client) *Bulker {
 	return &Bulker{
 		es:      es,
 		ch:      make(chan *bulkT, 32),
-		blkPool: sync.Pool{New: func() interface{} { return &bulkT{ch: make(chan respT, 1)}}},
+		blkPool: sync.Pool{New: func() interface{} { return &bulkT{ch: make(chan respT, 1)} }},
 	}
 }
 

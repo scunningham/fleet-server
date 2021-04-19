@@ -133,6 +133,7 @@ func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) e
 		cResponse := response
 		n.ch <- respT{
 			err:  response.deriveError(),
+			idx:  n.idx,
 			data: &cResponse,
 		}
 		n = next
