@@ -142,7 +142,6 @@ func stopTimer(t *time.Timer) {
 type queueT struct {
 	action  Action
 	head    *bulkT
-	tail    *bulkT
 	pending int
 }
 
@@ -201,7 +200,6 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 
 				q.pending = 0
 				q.head = nil
-				q.tail = nil
 			}
 		}
 
@@ -233,19 +231,9 @@ LOOP:
 				}
 			}
 
-			blk.next = nil // safety check
-
 			q := queues[queueIdx]
-			oldTail := q.tail
-			q.tail = blk
-
-			if oldTail != nil {
-				oldTail.next = blk
-			}
-
-			if q.head == nil {
-				q.head = blk
-			}
+			blk.next = q.head 
+			q.head = blk
 
 			q.pending += blk.buf.Len()
 
