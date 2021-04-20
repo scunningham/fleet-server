@@ -29,6 +29,8 @@ func WithRefresh() Opt {
 func WithRetryOnConflict(n int) Opt {
 	return func(opt *optionsT) {
 		opt.RetryOnConflict = n
+	}
+}
 
 // Applicable to search
 func WithIndex(idx string) Opt {
