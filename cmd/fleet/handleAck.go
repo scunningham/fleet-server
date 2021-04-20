@@ -247,7 +247,6 @@ func (ack *AckT) handleUnenroll(ctx context.Context, agent *model.Agent) error {
 }
 
 func (ack *AckT) handleUpgrade(ctx context.Context, agent *model.Agent) error {
-	updates := make([]bulk.MultiOp, 0, 1)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	doc := bulk.UpdateFields{

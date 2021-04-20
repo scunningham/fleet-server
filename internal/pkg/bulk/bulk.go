@@ -7,8 +7,6 @@ package bulk
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -371,120 +369,6 @@ func (b *Bulker) FreeBlk(blk *bulkT) {
 	b.blkPool.Put(blk)
 }
 
-<<<<<<< HEAD
-func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
-	opt := b.parseOpts(opts...)
-
-	blk := b.GetBlk(action, opt)
-
-	// Serialize request
-	const kSlop = 64
-	blk.data.Grow(len(body) + kSlop)
-
-	if err := b.writeBulkMeta(&blk.data, action, index, id, opt); err != nil {
-		return nil, err
-	}
-
-	if err := b.writeBulkBody(&blk.data, body); err != nil {
-		return nil, err
-	}
-
-	// Dispatch and wait for response
-	resp := b.dispatch(ctx, blk)
-	if resp.err != nil {
-		return nil, resp.err
-	}
-	b.PutBlk(blk)
-
-	r := resp.data.(*BulkIndexerResponseItem)
-	return r, nil
-}
-
-func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error) {
-	opt := b.parseOpts(opts...)
-
-	blk := b.GetBlk(ActionRead, opt)
-
-	// Serialize request
-	const kSlop = 64
-	blk.data.Grow(kSlop)
-
-	if err := b.writeMget(&blk.data, index, id); err != nil {
-		return nil, err
-	}
-
-	// Process response
-	resp := b.dispatch(ctx, blk)
-	if resp.err != nil {
-		return nil, resp.err
-	}
-	b.PutBlk(blk)
-
-	// Interpret response, looking for generated id
-	r := resp.data.(*MgetResponseItem)
-	return r.Source, nil
-}
-
-func (b *Bulker) Search(ctx context.Context, index []string, body []byte, opts ...Opt) (*es.ResultT, error) {
-	opt := b.parseOpts(opts...)
-
-	blk := b.GetBlk(ActionSearch, opt)
-
-	// Serialize request
-	const kSlop = 64
-	blk.data.Grow(len(body) + kSlop)
-
-	if err := b.writeMsearchMeta(&blk.data, index); err != nil {
-		return nil, err
-	}
-
-	if err := b.writeMsearchBody(&blk.data, body); err != nil {
-		return nil, err
-	}
-
-	// Process response
-	resp := b.dispatch(ctx, blk)
-	if resp.err != nil {
-		return nil, resp.err
-	}
-	b.PutBlk(blk)
-
-	// Interpret response
-	r := resp.data.(*MsearchResponseItem)
-	return &es.ResultT{HitsT: r.Hits, Aggregations: r.Aggregations}, nil
-}
-
-func (b *Bulker) writeMsearchMeta(buf *bytes.Buffer, indices []string) error {
-	if err := b.validateIndices(indices); err != nil {
-		return err
-	}
-
-	switch len(indices) {
-	case 0:
-		buf.WriteString("{ }\n")
-	case 1:
-		buf.WriteString(`{"index": "`)
-		buf.WriteString(indices[0])
-		buf.WriteString("\"}\n")
-	default:
-		buf.WriteString(`{"index": `)
-		if d, err := json.Marshal(indices); err != nil {
-			return err
-		} else {
-			buf.Write(d)
-		}
-		buf.WriteString("}\n")
-	}
-
-	return nil
-}
-
-func (b *Bulker) writeMsearchBody(buf *bytes.Buffer, body []byte) error {
-	buf.Write(body)
-	buf.WriteRune('\n')
-
-	return b.validateBody(body)
-}
 
 func (b *Bulker) validateIndex(index string) error {
 	// TODO: index

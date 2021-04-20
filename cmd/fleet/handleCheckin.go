@@ -26,7 +26,6 @@ import (
 	"github.com/elastic/fleet-server/v7/internal/pkg/policy"
 	"github.com/elastic/fleet-server/v7/internal/pkg/smap"
 	"github.com/elastic/fleet-server/v7/internal/pkg/sqn"
-	"github.com/miolini/datacounter"
 
 	"github.com/hashicorp/go-version"
 	"github.com/julienschmidt/httprouter"
