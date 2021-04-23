@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/rs/zerolog/log"
@@ -41,7 +42,7 @@ func (b *Bulker) Delete(ctx context.Context, index, id string, opts ...Opt) erro
 	return err
 }
 
-func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
+func (b *Bulker) waitBulkAction(ctx context.Context, action actionT, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
 	opt := b.parseOpts(opts...)
 
 	blk := b.NewBlk(action, opt)
@@ -50,7 +51,7 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action Action, index, id st
 	const kSlop = 64
 	blk.buf.Grow(len(body) + kSlop)
 
-	if err := b.writeBulkMeta(&blk.buf, action.Str(), index, id); err != nil {
+	if err := b.writeBulkMeta(&blk.buf, action.Str(), index, id, opt.RetryOnConflict); err != nil {
 		return nil, err
 	}
 
@@ -82,7 +83,7 @@ func (b *Bulker) writeMget(buf *Buf, index, id string) error {
 	return nil
 }
 
-func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id string) error {
+func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id string, retry int) error {
 	if err := b.validateMeta(index, id); err != nil {
 		return err
 	}
@@ -94,6 +95,11 @@ func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id string) error {
 		buf.WriteString(`"_id":"`)
 		buf.WriteString(id)
 		buf.WriteString(`",`)
+	}
+	if retry > 0 {
+		buf.WriteString(`"retry_on_conflict":`)
+		buf.WriteString(strconv.Itoa(retry))
+		buf.WriteString(`,`)
 	}
 
 	buf.WriteString(`"_index":"`)
@@ -135,27 +141,25 @@ func (b *Bulker) calcBulkSz(action, idx, id string, body []byte) int {
 	return metaSz + idSz + bodySz
 }
 
-func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) error {
+func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 
 	buf := bytes.Buffer{}
-	buf.Grow(szPending)
-
-	doRefresh := "false"
+	buf.Grow(queue.pending)
 
 	queueCnt := 0
-	for n := queue; n != nil; n = n.next {
+	for n := queue.head; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
 
-		if n.opts.Refresh {
-			doRefresh = "true"
-		}
 		queueCnt += 1
 	}
 
 	// Do actual bulk request; and send response on chan
 	req := esapi.BulkRequest{
-		Body:    bytes.NewReader(buf.Bytes()),
-		Refresh: doRefresh,
+		Body: bytes.NewReader(buf.Bytes()),
+	}
+
+	if queue.ty == kQueueRefreshBulk {
+		req.Refresh = "true"
 	}
 	res, err := req.Do(ctx, b.es)
 
@@ -182,7 +186,7 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 
 	log.Trace().
 		Err(err).
-		Bool("refresh", doRefresh == "true").
+		Bool("refresh", queue.ty == kQueueRefreshBulk).
 		Str("mod", kModBulk).
 		Int("took", blk.Took).
 		Bool("hasErrors", blk.HasErrors).
@@ -193,7 +197,12 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 		return fmt.Errorf("Bulk queue length mismatch")
 	}
 
-	n := queue
+	// WARNING: Once we start pushing items to
+	// the queue, the node pointers are invalid.
+	// Do NOT return a non-nil value or failQueue
+	// up the stack will fail.
+
+	n := queue.head
 	for _, blkItem := range blk.Items {
 		next := n.next // 'n' is invalid immediately on channel send
 
@@ -206,7 +215,7 @@ func (b *Bulker) flushBulk(ctx context.Context, queue *bulkT, szPending int) err
 				data: &item,
 			}:
 			default:
-				panic("Should not happen")
+				panic("Unexpected blocked response channel on flushBulk")
 			}
 
 			break

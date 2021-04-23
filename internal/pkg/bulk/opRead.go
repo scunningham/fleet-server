@@ -15,6 +15,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	rPrefix = "{\"docs\": ["
+	rSuffix = "]}"
+)
+
 func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error) {
 	opt := b.parseOpts(opts...)
 
@@ -40,15 +45,15 @@ func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byt
 	return r.Source, nil
 }
 
-func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) error {
+func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
 	buf := bytes.NewBufferString(rPrefix)
-	buf.Grow(szPending + len(rSuffix))
+	buf.Grow(queue.pending + len(rSuffix))
 
 	// Each item a JSON array element followed by comma
 	queueCnt := 0
-	for n := queue; n != nil; n = n.next {
+	for n := queue.head; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
 		queueCnt += 1
 	}
@@ -61,6 +66,13 @@ func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) err
 	req := esapi.MgetRequest{
 		Body: bytes.NewReader(payload),
 	}
+
+	var refresh bool
+	if queue.ty == kQueueRefreshRead {
+		refresh = true
+		req.Refresh = &refresh
+	}
+
 	res, err := req.Do(ctx, b.es)
 
 	if err != nil {
@@ -83,6 +95,7 @@ func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) err
 
 	log.Trace().
 		Err(err).
+		Bool("refresh", refresh).
 		Str("mod", kModBulk).
 		Dur("rtt", time.Since(start)).
 		Int("sz", len(blk.Items)).
@@ -92,14 +105,23 @@ func (b *Bulker) flushRead(ctx context.Context, queue *bulkT, szPending int) err
 		return fmt.Errorf("Mget queue length mismatch")
 	}
 
-	n := queue
+	// WARNING: Once we start pushing items to
+	// the queue, the node pointers are invalid.
+	// Do NOT return a non-nil value or failQueue
+	// up the stack will fail.
+
+	n := queue.head
 	for _, item := range blk.Items {
 		next := n.next // 'n' is invalid immediately on channel send
 		citem := item
-		n.ch <- respT{
+		select {
+		case n.ch <- respT{
 			err:  item.deriveError(),
 			idx:  n.idx,
 			data: &citem,
+		}:
+		default:
+			panic("Unexpected blocked response channel on flushRead")
 		}
 		n = next
 	}
