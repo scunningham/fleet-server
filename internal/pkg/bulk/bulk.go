@@ -40,23 +40,9 @@ type Bulk interface {
 	MUpdate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
 	MDelete(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error)
 
-
 	// Accessor used to talk to elastic search direcly bypassing bulk engine
 	Client() *elasticsearch.Client
 }
-
-type Action string
-
-func (a Action) Str() string { return string(a) }
-
-const (
-	ActionCreate Action = "create"
-	ActionDelete        = "delete"
-	ActionIndex         = "index"
-	ActionUpdate        = "update"
-	ActionRead          = "read"
-	ActionSearch        = "search"
-)
 
 const kModBulk = "bulk"
 
@@ -68,13 +54,11 @@ type Bulker struct {
 }
 
 const (
-	rPrefix = "{\"docs\": ["
-	rSuffix = "]}"
-
 	defaultFlushInterval     = time.Second * 5
 	defaultFlushThresholdCnt = 32768
 	defaultFlushThresholdSz  = 1024 * 1024 * 10
 	defaultMaxPending        = 32
+	defaultBlockQueueSz      = 32 // Small capacity to allow multiOp to spin fast
 )
 
 func InitES(ctx context.Context, cfg *config.Config, opts ...BulkOpt) (*elasticsearch.Client, Bulk, error) {
@@ -102,10 +86,14 @@ func InitES(ctx context.Context, cfg *config.Config, opts ...BulkOpt) (*elastics
 
 func NewBulker(es *elasticsearch.Client) *Bulker {
 
+	poolFunc := func() interface{} {
+		return &bulkT{ch: make(chan respT, 1)}
+	}
+
 	return &Bulker{
 		es:      es,
-		ch:      make(chan *bulkT, 32),
-		blkPool: sync.Pool{New: func() interface{} { return &bulkT{ch: make(chan respT, 1)} }},
+		ch:      make(chan *bulkT, defaultBlockQueueSz),
+		blkPool: sync.Pool{New: poolFunc},
 	}
 }
 
@@ -139,19 +127,28 @@ func stopTimer(t *time.Timer) {
 	}
 }
 
-type queueT struct {
-	action  Action
-	head    *bulkT
-	pending int
-}
+func blkToQueueType(blk *bulkT) queueType {
+	queueIdx := kQueueBulk
 
-const (
-	kQueueBulk = iota
-	kQueueRead
-	kQueueSearch
-	kQueueRefresh
-	kNumQueues
-)
+	forceRefresh := blk.flags.Has(flagRefresh)
+
+	switch blk.action {
+	case ActionSearch:
+		queueIdx = kQueueSearch
+	case ActionRead:
+		if forceRefresh {
+			queueIdx = kQueueRefreshRead
+		} else {
+			queueIdx = kQueueRead
+		}
+	default:
+		if forceRefresh {
+			queueIdx = kQueueRefreshBulk
+		}
+	}
+
+	return queueIdx
+}
 
 func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 	var err error
@@ -167,24 +164,11 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 
 	w := semaphore.NewWeighted(int64(bopts.maxPending))
 
-	queues := make([]*queueT, 0, kNumQueues)
-	for i := 0; i < kNumQueues; i++ {
-		var action Action
-		switch i {
-		case kQueueRead:
-			action = ActionRead
-		case kQueueSearch:
-			action = ActionSearch
-		case kQueueBulk, kQueueRefresh:
-			// Empty action is correct
-		default:
-			// Bad programmer
-			panic("Unknown bulk queue")
-		}
+	var queues [kNumQueues]queueT
 
-		queues = append(queues, &queueT{
-			action: action,
-		})
+	var i queueType
+	for ; i < kNumQueues; i++ {
+		queues[i].ty = i
 	}
 
 	var itemCnt int
@@ -192,14 +176,18 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 
 	doFlush := func() error {
 
-		for _, q := range queues {
+		for i := range queues {
+			q := &queues[i]
 			if q.pending > 0 {
-				if err := b.flushQueue(ctx, w, q.head, q.pending, q.action); err != nil {
+
+				// Pass queue structure by value
+				if err := b.flushQueue(ctx, w, *q); err != nil {
 					return err
 				}
 
-				q.pending = 0
+				// Reset local queue stored in array
 				q.head = nil
+				q.pending = 0
 			}
 		}
 
@@ -218,23 +206,14 @@ LOOP:
 
 		case blk := <-b.ch:
 
-			queueIdx := kQueueBulk
+			queueIdx := blkToQueueType(blk)
+			q := &queues[queueIdx]
 
-			switch blk.action {
-			case ActionRead:
-				queueIdx = kQueueRead
-			case ActionSearch:
-				queueIdx = kQueueSearch
-			default:
-				if blk.opts.Refresh {
-					queueIdx = kQueueRefresh
-				}
-			}
-
-			q := queues[queueIdx]
-			blk.next = q.head 
+			// Prepend block to head of target queue
+			blk.next = q.head
 			q.head = blk
 
+			// Update pending count on target queue
 			q.pending += blk.buf.Len()
 
 			// Update threshold counters
@@ -276,12 +255,12 @@ LOOP:
 	return err
 }
 
-func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *bulkT, szPending int, action Action) error {
+func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue queueT) error {
 	start := time.Now()
 	log.Trace().
 		Str("mod", kModBulk).
-		Int("szPending", szPending).
-		Str("action", action.Str()).
+		Int("szPending", queue.pending).
+		Str("queue", queue.Type()).
 		Msg("flushQueue Wait")
 
 	if err := w.Acquire(ctx, 1); err != nil {
@@ -291,8 +270,8 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *b
 	log.Trace().
 		Str("mod", kModBulk).
 		Dur("tdiff", time.Since(start)).
-		Int("szPending", szPending).
-		Str("action", action.Str()).
+		Int("szPending", queue.pending).
+		Str("queue", queue.Type()).
 		Msg("flushQueue Acquired")
 
 	go func() {
@@ -301,13 +280,13 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *b
 		defer w.Release(1)
 
 		var err error
-		switch action {
-		case ActionRead:
-			err = b.flushRead(ctx, queue, szPending)
-		case ActionSearch:
-			err = b.flushSearch(ctx, queue, szPending)
+		switch queue.ty {
+		case kQueueRead, kQueueRefreshRead:
+			err = b.flushRead(ctx, queue)
+		case kQueueSearch:
+			err = b.flushSearch(ctx, queue)
 		default:
-			err = b.flushBulk(ctx, queue, szPending)
+			err = b.flushBulk(ctx, queue)
 		}
 
 		if err != nil {
@@ -317,8 +296,8 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *b
 		log.Trace().
 			Err(err).
 			Str("mod", kModBulk).
-			Int("szPending", szPending).
-			Str("action", action.Str()).
+			Int("szPending", queue.pending).
+			Str("queue", queue.Type()).
 			Dur("rtt", time.Since(start)).
 			Msg("flushQueue Done")
 
@@ -327,8 +306,8 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue *b
 	return nil
 }
 
-func failQueue(queue *bulkT, err error) {
-	for n := queue; n != nil; {
+func failQueue(queue queueT, err error) {
+	for n := queue.head; n != nil; {
 		next := n.next // 'n' is invalid immediately on channel send
 		n.ch <- respT{
 			err: err,
@@ -345,10 +324,12 @@ func (b *Bulker) parseOpts(opts ...Opt) optionsT {
 	return opt
 }
 
-func (b *Bulker) NewBlk(action Action, opts optionsT) *bulkT {
+func (b *Bulker) NewBlk(action actionT, opts optionsT) *bulkT {
 	blk := b.blkPool.Get().(*bulkT)
 	blk.action = action
-	blk.opts = opts
+	if opts.Refresh {
+		blk.flags.Set(flagRefresh)
+	}
 	return blk
 }
 
@@ -356,7 +337,6 @@ func (b *Bulker) FreeBlk(blk *bulkT) {
 	blk.reset()
 	b.blkPool.Put(blk)
 }
-
 
 func (b *Bulker) validateIndex(index string) error {
 	// TODO: index
@@ -397,7 +377,7 @@ func (b *Bulker) dispatch(ctx context.Context, blk *bulkT) respT {
 			Err(ctx.Err()).
 			Str("mod", kModBulk).
 			Str("action", blk.action.Str()).
-			Bool("refresh", blk.opts.Refresh).
+			Bool("refresh", blk.flags.Has(flagRefresh)).
 			Dur("rtt", time.Since(start)).
 			Msg("Dispatch abort queue")
 		return respT{err: ctx.Err()}
@@ -409,7 +389,7 @@ func (b *Bulker) dispatch(ctx context.Context, blk *bulkT) respT {
 		log.Trace().
 			Str("mod", kModBulk).
 			Str("action", blk.action.Str()).
-			Bool("refresh", blk.opts.Refresh).
+			Bool("refresh", blk.flags.Has(flagRefresh)).
 			Dur("rtt", time.Since(start)).
 			Msg("Dispatch OK")
 
@@ -419,22 +399,10 @@ func (b *Bulker) dispatch(ctx context.Context, blk *bulkT) respT {
 			Err(ctx.Err()).
 			Str("mod", kModBulk).
 			Str("action", blk.action.Str()).
-			Bool("refresh", blk.opts.Refresh).
+			Bool("refresh", blk.flags.Has(flagRefresh)).
 			Dur("rtt", time.Since(start)).
 			Msg("Dispatch abort response")
 	}
 
 	return respT{err: ctx.Err()}
-}
-
-type UpdateFields map[string]interface{}
-
-func (u UpdateFields) Marshal() ([]byte, error) {
-	doc := struct {
-		Doc map[string]interface{} `json:"doc"`
-	}{
-		u,
-	}
-
-	return json.Marshal(doc)
 }

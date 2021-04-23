@@ -15,7 +15,7 @@ import (
 type optionsT struct {
 	Refresh         bool
 	RetryOnConflict int
-	Indices []string
+	Indices         []string
 }
 
 type Opt func(*optionsT)

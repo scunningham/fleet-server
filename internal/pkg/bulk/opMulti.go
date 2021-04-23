@@ -6,6 +6,7 @@ package bulk
 
 import (
 	"context"
+	"errors"
 )
 
 func (b *Bulker) MCreate(ctx context.Context, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
@@ -24,10 +25,15 @@ func (b *Bulker) MDelete(ctx context.Context, ops []MultiOp, opts ...Opt) ([]Bul
 	return b.multiWaitBulkOp(ctx, ActionDelete, ops)
 }
 
-
-func (b *Bulker) multiWaitBulkOp(ctx context.Context, action Action, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
+func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []MultiOp, opts ...Opt) ([]BulkIndexerResponseItem, error) {
 	if len(ops) == 0 {
 		return nil, nil
+	}
+
+	const kMaxBulk = (1 << 32) - 1
+
+	if len(ops) > kMaxBulk {
+		return nil, errors.New("Too many bulk ops")
 	}
 
 	opt := b.parseOpts(opts...)
@@ -55,7 +61,7 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action Action, ops []Multi
 
 		op := &ops[i]
 
-		if err := b.writeBulkMeta(&bulkBuf, actionStr, op.Index, op.Id); err != nil {
+		if err := b.writeBulkMeta(&bulkBuf, actionStr, op.Index, op.Id, opt.RetryOnConflict); err != nil {
 			return nil, err
 		}
 
@@ -65,10 +71,12 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action Action, ops []Multi
 
 		bulk := &bulks[i]
 		bulk.ch = ch
-		bulk.idx = i
-		bulk.opts = opt
+		bulk.idx = int32(i)
 		bulk.action = action
 		bulk.buf.buf = bulkBuf.buf[bufIdx:]
+		if opt.Refresh {
+			bulk.flags.Set(flagRefresh)
+		}
 	}
 
 	// Dispatch requests

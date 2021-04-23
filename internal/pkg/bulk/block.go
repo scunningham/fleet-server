@@ -8,18 +8,57 @@ package bulk
 // However, the multiOp API's will allocate directly in large blocks.
 
 type bulkT struct {
-	idx    int        // idx of originating requeset, used in mulitOp
-	action Action     // requested actions
+	action actionT    // requested actions
+	flags  flagsT     // execution flags
+	idx    int32      // idx of originating requeset, used in mulitOp
 	ch     chan respT // response channel, caller is waiting synchronously
 	buf    Buf        // json payload to be sent to elastic
-	opts   optionsT   // various options
 	next   *bulkT     // pointer to next bulkT, used for fast internal queueing
 }
 
+type flagsT int8
+
+const (
+	flagRefresh flagsT = 1 << iota
+)
+
+func (ft flagsT) Has(f flagsT) bool {
+	return ft&f != 0
+}
+
+func (ft *flagsT) Set(f flagsT) {
+	*ft = *ft | f
+}
+
+type actionT int8
+
+const (
+	ActionCreate actionT = iota
+	ActionDelete
+	ActionIndex
+	ActionUpdate
+	ActionRead
+	ActionSearch
+)
+
+var actionStrings = []string{
+	"create",
+	"delete",
+	"index",
+	"update",
+	"read",
+	"search",
+}
+
+func (a actionT) Str() string {
+	return actionStrings[a]
+}
+
 func (blk *bulkT) reset() {
-	blk.action = ""
+	blk.action = 0
+	blk.flags = 0
+	blk.idx = 0
 	blk.buf.Reset()
-	blk.opts = optionsT{}
 	blk.next = nil
 }
 
@@ -31,6 +70,6 @@ func newBlk() interface{} {
 
 type respT struct {
 	err  error
-	idx  int
+	idx  int32
 	data interface{}
 }

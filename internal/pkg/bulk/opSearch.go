@@ -83,14 +83,14 @@ func (b *Bulker) writeMsearchBody(buf *Buf, body []byte) error {
 	return b.validateBody(body)
 }
 
-func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) error {
+func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
 	buf := bytes.Buffer{}
-	buf.Grow(szPending)
+	buf.Grow(queue.pending)
 
 	queueCnt := 0
-	for n := queue; n != nil; n = n.next {
+	for n := queue.head; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
 
 		queueCnt += 1
@@ -132,15 +132,24 @@ func (b *Bulker) flushSearch(ctx context.Context, queue *bulkT, szPending int) e
 		return fmt.Errorf("Bulk queue length mismatch")
 	}
 
-	n := queue
+	// WARNING: Once we start pushing items to
+	// the queue, the node pointers are invalid.
+	// Do NOT return a non-nil value or failQueue
+	// up the stack will fail.
+
+	n := queue.head
 	for _, response := range blk.Responses {
 		next := n.next // 'n' is invalid immediately on channel send
 
 		cResponse := response
-		n.ch <- respT{
+		select {
+		case n.ch <- respT{
 			err:  response.deriveError(),
 			idx:  n.idx,
 			data: &cResponse,
+		}:
+		default:
+			panic("Unexpected blocked response channel on flushSearch")
 		}
 		n = next
 	}
