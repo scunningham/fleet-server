@@ -28,10 +28,10 @@ type Bulk interface {
 
 	// Synchronous operations run in the bulk engine
 	Create(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
-	Index(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
+	Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error)
 	Update(ctx context.Context, index, id string, body []byte, opts ...Opt) error
 	Delete(ctx context.Context, index, id string, opts ...Opt) error
-	Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error)
+	Index(ctx context.Context, index, id string, body []byte, opts ...Opt) (string, error)
 	Search(ctx context.Context, index string, body []byte, opts ...Opt) (*es.ResultT, error)
 
 	// Multi Operation API's run in the bulk engine

@@ -3,6 +3,7 @@ module github.com/elastic/fleet-server/v7
 go 1.15
 
 require (
+	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/aleksmaus/generate v0.0.0-20210326194607-c630e07a2742
 	github.com/dgraph-io/ristretto v0.0.3
 	github.com/elastic/beats/v7 v7.11.1
