@@ -38,6 +38,8 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []Mult
 
 	opt := b.parseOpts(opts...)
 
+	// Contract is that consumer never blocks, so much preallocate.
+	// Could consider making the response channel *respT to limit memory usage.
 	ch := make(chan respT, len(ops))
 
 	actionStr := action.Str()
