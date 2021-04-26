@@ -147,9 +147,9 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 
 	const kEstimatePerItem = 100
 
-	bufSz := queue.pending
-	if bufSz < queue.cnt*kEstimatePerItem {
-		bufSz = queue.cnt * kEstimatePerItem
+	bufSz := queue.cnt * kEstimatePerItem
+	if bufSz < queue.pending {
+		bufSz = queue.pending
 	}
 
 	var buf bytes.Buffer

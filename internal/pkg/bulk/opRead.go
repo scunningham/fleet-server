@@ -50,9 +50,9 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 
 	const kEstimatePerItem = 256 // Rough estimate
 
-	bufSz := queue.pending + len(rSuffix)
-	if bufSz < queue.cnt*kEstimatePerItem {
-		bufSz = queue.cnt * kEstimatePerItem
+	bufSz := queue.cnt * kEstimatePerItem
+	if bufSz < queue.pending+len(rSuffix) {
+		bufSz = queue.pending + len(rSuffix)
 	}
 
 	buf := bytes.NewBufferString(rPrefix)

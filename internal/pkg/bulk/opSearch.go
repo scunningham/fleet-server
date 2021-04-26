@@ -88,9 +88,9 @@ func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 
 	const kEstimatePerItem = 256 // Rough estimate
 
-	bufSz := queue.pending
-	if bufSz < queue.cnt*kEstimatePerItem {
-		bufSz = queue.cnt * kEstimatePerItem
+	bufSz := queue.cnt * kEstimatePerItem
+	if bufSz < queue.pending {
+		bufSz = queue.pending
 	}
 
 	var buf bytes.Buffer
