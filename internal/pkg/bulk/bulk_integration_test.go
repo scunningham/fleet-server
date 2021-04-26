@@ -294,7 +294,7 @@ func benchmarkCreate(n int, b *testing.B) {
 }
 
 func BenchmarkCreate_1(b *testing.B)    { benchmarkCreate(1, b) }
-func BenchmarkCreate_8(b *testing.B)    { benchmarkCreate(8, b) }
+func BenchmarkCreate_64(b *testing.B)   { benchmarkCreate(64, b) }
 func BenchmarkCreate_8192(b *testing.B) { benchmarkCreate(8192, b) }
 
 // This runs a series of CRUD operations through elastic.
@@ -362,9 +362,6 @@ func benchmarkCRUD(n int, b *testing.B) {
 	wait.Wait()
 }
 
-func BenchmarkCRUD_1(b *testing.B) { benchmarkCRUD(1, b) }
-func BenchmarkCRUD_4(b *testing.B) { benchmarkCRUD(4, b) }
-
-//func BenchmarkCRUD_64(b *testing.B)    { benchmarkCRUD(64, b) }
-//func BenchmarkCRUD_2048(b *testing.B)    { benchmarkCRUD(2048, b) }
+func BenchmarkCRUD_1(b *testing.B)    { benchmarkCRUD(1, b) }
+func BenchmarkCRUD_64(b *testing.B)   { benchmarkCRUD(64, b) }
 func BenchmarkCRUD_8192(b *testing.B) { benchmarkCRUD(8192, b) }

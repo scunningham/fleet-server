@@ -145,9 +145,9 @@ func (b *Bulker) calcBulkSz(action, idx, id string, body []byte) int {
 func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
-	const kEstimatePerItem = 100
+	const kRoughEstimatePerItem = 128
 
-	bufSz := queue.cnt * kEstimatePerItem
+	bufSz := queue.cnt * kRoughEstimatePerItem
 	if bufSz < queue.pending {
 		bufSz = queue.pending
 	}

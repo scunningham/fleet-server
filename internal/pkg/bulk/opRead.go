@@ -48,9 +48,9 @@ func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byt
 func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
-	const kEstimatePerItem = 256 // Rough estimate
+	const kRoughEstimatePerItem = 256
 
-	bufSz := queue.cnt * kEstimatePerItem
+	bufSz := queue.cnt * kRoughEstimatePerItem
 	if bufSz < queue.pending+len(rSuffix) {
 		bufSz = queue.pending + len(rSuffix)
 	}

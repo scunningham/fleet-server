@@ -86,9 +86,9 @@ func (b *Bulker) writeMsearchBody(buf *Buf, body []byte) error {
 func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
-	const kEstimatePerItem = 256 // Rough estimate
+	const kRoughEstimatePerItem = 256
 
-	bufSz := queue.cnt * kEstimatePerItem
+	bufSz := queue.cnt * kRoughEstimatePerItem
 	if bufSz < queue.pending {
 		bufSz = queue.pending
 	}
