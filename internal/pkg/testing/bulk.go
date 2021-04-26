@@ -42,10 +42,9 @@ func (m MockBulk) Read(ctx context.Context, index, id string, opts ...bulk.Opt) 
 	return nil, nil
 }
 
-func (m MockBulk) Delete(ctx context.Context, index, id string, opts ...bulk.Opt)  error {
+func (m MockBulk) Delete(ctx context.Context, index, id string, opts ...bulk.Opt) error {
 	return nil
 }
-
 
 func (m MockBulk) MCreate(ctx context.Context, ops []bulk.MultiOp, opts ...bulk.Opt) ([]bulk.BulkIndexerResponseItem, error) {
 	return nil, nil
