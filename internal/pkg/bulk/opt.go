@@ -65,7 +65,7 @@ func WithFlushThresholdCount(cnt int) BulkOpt {
 	}
 }
 
-// Cummulative size of pending transactions that will force flush before interval
+// Cummulative size in bytes of pending transactions that will force flush before interval
 func WithFlushThresholdSize(sz int) BulkOpt {
 	return func(opt *bulkOptT) {
 		opt.flushThresholdSz = sz

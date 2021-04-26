@@ -48,8 +48,15 @@ func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byt
 func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
+	const kEstimatePerItem = 256 // Rough estimate
+
+	bufSz := queue.pending + len(rSuffix)
+	if bufSz < queue.cnt*kEstimatePerItem {
+		bufSz = queue.cnt * kEstimatePerItem
+	}
+
 	buf := bytes.NewBufferString(rPrefix)
-	buf.Grow(queue.pending + len(rSuffix))
+	buf.Grow(bufSz)
 
 	// Each item a JSON array element followed by comma
 	queueCnt := 0
@@ -76,6 +83,7 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	res, err := req.Do(ctx, b.es)
 
 	if err != nil {
+		log.Error().Err(err).Str("mod", kModBulk).Msg("Fail MgetRequest req.Do")
 		return err
 	}
 
@@ -84,13 +92,25 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	}
 
 	if res.IsError() {
+		log.Error().Str("mod", kModBulk).Str("err", res.String()).Msg("Fail MgetRequest result")
 		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
 	}
 
+	// Reuse buffer
+	buf.Reset()
+
+	bodySz, err := buf.ReadFrom(res.Body)
+	if err != nil {
+		log.Error().Err(err).Str("mod", kModBulk).Msg("Response error")
+	}
+
+	// prealloc slice
 	var blk MgetResponse
-	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(&blk); err != nil {
-		return fmt.Errorf("flush: error parsing response body: %s", err) // TODO: Wrap error
+	blk.Items = make([]MgetResponseItem, 0, queueCnt)
+
+	if err = json.Unmarshal(buf.Bytes(), &blk); err != nil {
+		log.Error().Err(err).Str("mod", kModBulk).Msg("Unmarshal error")
+		return err
 	}
 
 	log.Trace().
@@ -98,7 +118,9 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 		Bool("refresh", refresh).
 		Str("mod", kModBulk).
 		Dur("rtt", time.Since(start)).
-		Int("sz", len(blk.Items)).
+		Int("cnt", len(blk.Items)).
+		Int("bufSz", bufSz).
+		Int64("bodySz", bodySz).
 		Msg("flushRead")
 
 	if len(blk.Items) != queueCnt {
@@ -111,14 +133,14 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	// up the stack will fail.
 
 	n := queue.head
-	for _, item := range blk.Items {
+	for i := range blk.Items {
 		next := n.next // 'n' is invalid immediately on channel send
-		citem := item
+		item := &blk.Items[i]
 		select {
 		case n.ch <- respT{
 			err:  item.deriveError(),
 			idx:  n.idx,
-			data: &citem,
+			data: item,
 		}:
 		default:
 			panic("Unexpected blocked response channel on flushRead")

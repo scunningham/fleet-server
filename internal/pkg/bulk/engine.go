@@ -14,6 +14,7 @@ import (
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
@@ -47,7 +48,7 @@ type Bulk interface {
 const kModBulk = "bulk"
 
 type Bulker struct {
-	es *elasticsearch.Client
+	es esapi.Transport
 	ch chan *bulkT
 
 	blkPool sync.Pool
@@ -68,23 +69,25 @@ func InitES(ctx context.Context, cfg *config.Config, opts ...BulkOpt) (*elastics
 		return nil, nil, err
 	}
 
-	opts = append(opts,
+	// Options specified on API should override config
+	nopts := []BulkOpt{
 		WithFlushInterval(cfg.Output.Elasticsearch.BulkFlushInterval),
 		WithFlushThresholdCount(cfg.Output.Elasticsearch.BulkFlushThresholdCount),
 		WithFlushThresholdSize(cfg.Output.Elasticsearch.BulkFlushThresholdSize),
 		WithMaxPending(cfg.Output.Elasticsearch.BulkFlushMaxPending),
-	)
+	}
+	nopts = append(nopts, opts...)
 
 	blk := NewBulker(es)
 	go func() {
-		err := blk.Run(ctx, opts...)
+		err := blk.Run(ctx, nopts...)
 		log.Info().Err(err).Msg("Bulker exit")
 	}()
 
 	return es, blk, nil
 }
 
-func NewBulker(es *elasticsearch.Client) *Bulker {
+func NewBulker(es esapi.Transport) *Bulker {
 
 	poolFunc := func() interface{} {
 		return &bulkT{ch: make(chan respT, 1)}
@@ -98,7 +101,11 @@ func NewBulker(es *elasticsearch.Client) *Bulker {
 }
 
 func (b *Bulker) Client() *elasticsearch.Client {
-	return b.es
+	client, ok := b.es.(*elasticsearch.Client)
+	if !ok {
+		panic("Client is not an elastic search pointer")
+	}
+	return client
 }
 
 func (b *Bulker) parseBulkOpts(opts ...BulkOpt) bulkOptT {
@@ -186,6 +193,7 @@ func (b *Bulker) Run(ctx context.Context, opts ...BulkOpt) error {
 				}
 
 				// Reset local queue stored in array
+				q.cnt = 0
 				q.head = nil
 				q.pending = 0
 			}
@@ -214,6 +222,7 @@ LOOP:
 			q.head = blk
 
 			// Update pending count on target queue
+			q.cnt += 1
 			q.pending += blk.buf.Len()
 
 			// Update threshold counters
@@ -259,6 +268,7 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue qu
 	start := time.Now()
 	log.Trace().
 		Str("mod", kModBulk).
+		Int("cnt", queue.cnt).
 		Int("szPending", queue.pending).
 		Str("queue", queue.Type()).
 		Msg("flushQueue Wait")
@@ -269,6 +279,7 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue qu
 
 	log.Trace().
 		Str("mod", kModBulk).
+		Int("cnt", queue.cnt).
 		Dur("tdiff", time.Since(start)).
 		Int("szPending", queue.pending).
 		Str("queue", queue.Type()).
@@ -296,6 +307,7 @@ func (b *Bulker) flushQueue(ctx context.Context, w *semaphore.Weighted, queue qu
 		log.Trace().
 			Err(err).
 			Str("mod", kModBulk).
+			Int("cnt", queue.cnt).
 			Int("szPending", queue.pending).
 			Str("queue", queue.Type()).
 			Dur("rtt", time.Since(start)).

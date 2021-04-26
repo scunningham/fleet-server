@@ -2,6 +2,7 @@ package bulk
 
 type queueT struct {
 	ty      queueType
+	cnt     int
 	head    *bulkT
 	pending int
 }

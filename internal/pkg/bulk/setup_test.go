@@ -40,7 +40,7 @@ func init() {
 	}
 }
 
-func SetupBulk(ctx context.Context, t *testing.T, opts ...BulkOpt) Bulk {
+func SetupBulk(ctx context.Context, t testing.TB, opts ...BulkOpt) Bulk {
 	t.Helper()
 	_, bulker, err := InitES(ctx, &defaultCfg, opts...)
 	if err != nil {
@@ -49,7 +49,7 @@ func SetupBulk(ctx context.Context, t *testing.T, opts ...BulkOpt) Bulk {
 	return bulker
 }
 
-func SetupIndex(ctx context.Context, t *testing.T, bulker Bulk, mapping string) string {
+func SetupIndex(ctx context.Context, t testing.TB, bulker Bulk, mapping string) string {
 	t.Helper()
 	index := xid.New().String()
 	err := esutil.EnsureIndex(ctx, bulker.Client(), index, mapping)
@@ -59,7 +59,7 @@ func SetupIndex(ctx context.Context, t *testing.T, bulker Bulk, mapping string) 
 	return index
 }
 
-func SetupIndexWithBulk(ctx context.Context, t *testing.T, mapping string, opts ...BulkOpt) (string, Bulk) {
+func SetupIndexWithBulk(ctx context.Context, t testing.TB, mapping string, opts ...BulkOpt) (string, Bulk) {
 	t.Helper()
 	bulker := SetupBulk(ctx, t, opts...)
 	index := SetupIndex(ctx, t, bulker, mapping)

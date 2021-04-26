@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/google/go-cmp/cmp"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 const testPolicy = `{
@@ -69,7 +72,7 @@ func NewRandomSample() testT {
 	}
 }
 
-func (ts testT) marshal(t *testing.T) []byte {
+func (ts testT) marshal(t testing.TB) []byte {
 	data, err := json.Marshal(&ts)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +80,7 @@ func (ts testT) marshal(t *testing.T) []byte {
 	return data
 }
 
-func (ts *testT) read(t *testing.T, bulker Bulk, ctx context.Context, index, id string) {
+func (ts *testT) read(t testing.TB, bulker Bulk, ctx context.Context, index, id string) {
 	data, err := bulker.Read(ctx, index, id)
 	if err != nil {
 		t.Fatal(err)
@@ -89,11 +92,10 @@ func (ts *testT) read(t *testing.T, bulker Bulk, ctx context.Context, index, id 
 	}
 }
 
-// break into multiple tests. not one big crud
-// no index
+// TODO:
 // specify id
 // specify illegal id
-// no boyd
+// no body
 // bad body
 // bad index
 // WithREfresh() options
@@ -167,7 +169,7 @@ func TestBulkUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = bulker.Update(ctx, index, id, data)
+	err = bulker.Update(ctx, index, id, data, WithRefresh())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,3 +252,119 @@ func TestBulkDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// This runs a series of CRUD operations through elastic.
+// Not a particularly useful benchmark, but gives some idea of memory overhead.
+
+func benchmarkCreate(n int, b *testing.B) {
+	b.ReportAllocs()
+
+	l := zerolog.GlobalLevel()
+	defer zerolog.SetGlobalLevel(l)
+
+	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+
+	ctx, cn := context.WithCancel(context.Background())
+	defer cn()
+
+	index, bulker := SetupIndexWithBulk(ctx, b, testPolicy, WithFlushThresholdCount(n))
+
+	var wait sync.WaitGroup
+	wait.Add(n)
+	for i := 0; i < n; i++ {
+
+		go func() {
+			defer wait.Done()
+
+			sample := NewRandomSample()
+			sampleData := sample.marshal(b)
+
+			for j := 0; j < b.N; j++ {
+
+				// Create
+				_, err := bulker.Create(ctx, index, "", sampleData)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		}()
+	}
+
+	wait.Wait()
+}
+
+func BenchmarkCreate_1(b *testing.B)    { benchmarkCreate(1, b) }
+func BenchmarkCreate_8(b *testing.B)    { benchmarkCreate(8, b) }
+func BenchmarkCreate_8192(b *testing.B) { benchmarkCreate(8192, b) }
+
+// This runs a series of CRUD operations through elastic.
+// Not a particularly useful benchmark, but gives some idea of memory overhead.
+
+func benchmarkCRUD(n int, b *testing.B) {
+	b.ReportAllocs()
+
+	l := zerolog.GlobalLevel()
+	defer zerolog.SetGlobalLevel(l)
+
+	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+
+	ctx, cn := context.WithCancel(context.Background())
+	defer cn()
+
+	index, bulker := SetupIndexWithBulk(ctx, b, testPolicy, WithFlushThresholdCount(n))
+
+	fieldUpdate := UpdateFields{"kwval": "funkycoldmedina"}
+	fieldData, err := fieldUpdate.Marshal()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var wait sync.WaitGroup
+	wait.Add(n)
+	for i := 0; i < n; i++ {
+
+		go func() {
+			defer wait.Done()
+
+			sample := NewRandomSample()
+			sampleData := sample.marshal(b)
+
+			for j := 0; j < b.N; j++ {
+
+				// Create
+				id, err := bulker.Create(ctx, index, "", sampleData)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				// Read
+				_, err = bulker.Read(ctx, index, id)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				// Update
+				err = bulker.Update(ctx, index, id, fieldData)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				// Delete
+				err = bulker.Delete(ctx, index, id)
+				if err != nil {
+					log.Info().Str("index", index).Str("id", id).Msg("dlete fail")
+					b.Fatal(err)
+				}
+			}
+		}()
+	}
+
+	wait.Wait()
+}
+
+func BenchmarkCRUD_1(b *testing.B) { benchmarkCRUD(1, b) }
+func BenchmarkCRUD_4(b *testing.B) { benchmarkCRUD(4, b) }
+
+//func BenchmarkCRUD_64(b *testing.B)    { benchmarkCRUD(64, b) }
+//func BenchmarkCRUD_2048(b *testing.B)    { benchmarkCRUD(2048, b) }
+func BenchmarkCRUD_8192(b *testing.B) { benchmarkCRUD(8192, b) }

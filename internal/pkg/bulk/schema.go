@@ -6,13 +6,14 @@ package bulk
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 )
 
 type BulkIndexerResponse struct {
-	Took      int                                  `json:"took"`
-	HasErrors bool                                 `json:"errors"`
-	Items     []map[string]BulkIndexerResponseItem `json:"items,omitempty"`
+	Took      int                       `json:"took"`
+	HasErrors bool                      `json:"errors"`
+	Items     []BulkIndexerResponseItem `json:"items,omitempty"`
 }
 
 // Comment out fields we don't use; no point decoding.
@@ -32,6 +33,49 @@ type BulkIndexerResponseItem struct {
 	//	} `json:"_shards"`
 
 	Error es.ErrorT `json:"error,omitempty"`
+}
+
+// Elastic returns shape: map[action]BulkIndexerResponseItem.
+// Avoid allocating map; very expensive memory alloc for this
+// case when there is only one legal key.
+func (bi *BulkIndexerResponseItem) UnmarshalJSON(data []byte) error {
+	type innerT struct {
+		DocumentID string    `json:"_id"`
+		Status     int       `json:"status"`
+		Error      es.ErrorT `json:"error,omitempty"`
+	}
+
+	var w struct {
+		Index  *innerT `json:"index"`
+		Delete *innerT `json:"delete"`
+		Create *innerT `json:"create"`
+		Update *innerT `json:"update"`
+	}
+
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+
+	var v *innerT
+	switch {
+	case w.Index != nil:
+		v = w.Index
+	case w.Delete != nil:
+		v = w.Delete
+	case w.Create != nil:
+		v = w.Create
+	case w.Update != nil:
+		v = w.Update
+	default:
+		return errors.New("unknown bulk action")
+	}
+
+	*bi = BulkIndexerResponseItem{
+		DocumentID: v.DocumentID,
+		Status:     v.Status,
+		Error:      v.Error,
+	}
+	return nil
 }
 
 type MgetResponse struct {

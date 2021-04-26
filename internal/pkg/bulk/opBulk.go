@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/rs/zerolog/log"
@@ -142,18 +143,25 @@ func (b *Bulker) calcBulkSz(action, idx, id string, body []byte) int {
 }
 
 func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
+	start := time.Now()
 
-	buf := bytes.Buffer{}
-	buf.Grow(queue.pending)
+	const kEstimatePerItem = 100
+
+	bufSz := queue.pending
+	if bufSz < queue.cnt*kEstimatePerItem {
+		bufSz = queue.cnt * kEstimatePerItem
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(bufSz)
 
 	queueCnt := 0
 	for n := queue.head; n != nil; n = n.next {
 		buf.Write(n.buf.Bytes())
-
 		queueCnt += 1
 	}
 
-	// Do actual bulk request; and send response on chan
+	// Do actual bulk request; defer to the client
 	req := esapi.BulkRequest{
 		Body: bytes.NewReader(buf.Bytes()),
 	}
@@ -161,10 +169,11 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 	if queue.ty == kQueueRefreshBulk {
 		req.Refresh = "true"
 	}
+
 	res, err := req.Do(ctx, b.es)
 
 	if err != nil {
-		log.Error().Err(err).Str("mod", kModBulk).Msg("Fail req.Do")
+		log.Error().Err(err).Str("mod", kModBulk).Msg("Fail BulkRequest req.Do")
 		return err
 	}
 
@@ -173,15 +182,32 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 	}
 
 	if res.IsError() {
-		log.Error().Str("mod", kModBulk).Str("err", res.String()).Msg("Fail result")
+		log.Error().Str("mod", kModBulk).Str("err", res.String()).Msg("Fail BulkRequest result")
 		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
 	}
 
+	// Reuse buffer
+	buf.Reset()
+
+	bodySz, err := buf.ReadFrom(res.Body)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("mod", kModBulk).
+			Msg("Response error")
+		return err
+	}
+
+	// prealloc slice
 	var blk BulkIndexerResponse
-	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(&blk); err != nil {
-		log.Error().Err(err).Str("mod", kModBulk).Msg("Decode error")
-		return fmt.Errorf("flush: error parsing response body: %s", err) // TODO: Wrap error
+	blk.Items = make([]BulkIndexerResponseItem, 0, queueCnt)
+
+	if err = json.Unmarshal(buf.Bytes(), &blk); err != nil {
+		log.Error().
+			Err(err).
+			Str("mod", kModBulk).
+			Msg("Unmarshal error")
+		return err
 	}
 
 	log.Trace().
@@ -189,8 +215,11 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 		Bool("refresh", queue.ty == kQueueRefreshBulk).
 		Str("mod", kModBulk).
 		Int("took", blk.Took).
+		Dur("rtt", time.Since(start)).
 		Bool("hasErrors", blk.HasErrors).
-		Int("sz", len(blk.Items)).
+		Int("cnt", len(blk.Items)).
+		Int("bufSz", bufSz).
+		Int64("bodySz", bodySz).
 		Msg("flushBulk")
 
 	if len(blk.Items) != queueCnt {
@@ -203,23 +232,20 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 	// up the stack will fail.
 
 	n := queue.head
-	for _, blkItem := range blk.Items {
+	for i, _ := range blk.Items {
 		next := n.next // 'n' is invalid immediately on channel send
 
-		for _, item := range blkItem {
-
-			select {
-			case n.ch <- respT{
-				err:  item.deriveError(),
-				idx:  n.idx,
-				data: &item,
-			}:
-			default:
-				panic("Unexpected blocked response channel on flushBulk")
-			}
-
-			break
+		item := &blk.Items[i]
+		select {
+		case n.ch <- respT{
+			err:  item.deriveError(),
+			idx:  n.idx,
+			data: item,
+		}:
+		default:
+			panic("Unexpected blocked response channel on flushBulk")
 		}
+
 		n = next
 	}
 

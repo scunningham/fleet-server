@@ -86,8 +86,15 @@ func (b *Bulker) writeMsearchBody(buf *Buf, body []byte) error {
 func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 	start := time.Now()
 
-	buf := bytes.Buffer{}
-	buf.Grow(queue.pending)
+	const kEstimatePerItem = 256 // Rough estimate
+
+	bufSz := queue.pending
+	if bufSz < queue.cnt*kEstimatePerItem {
+		bufSz = queue.cnt * kEstimatePerItem
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(bufSz)
 
 	queueCnt := 0
 	for n := queue.head; n != nil; n = n.next {
@@ -114,10 +121,22 @@ func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
 	}
 
+	// Reuse buffer
+	buf.Reset()
+
+	bodySz, err := buf.ReadFrom(res.Body)
+	if err != nil {
+		log.Error().Err(err).Str("mod", kModBulk).Msg("MsearchResponse error")
+		return err
+	}
+
+	// prealloc slice
 	var blk MsearchResponse
-	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(&blk); err != nil {
-		return fmt.Errorf("flush: error parsing response body: %s", err) // TODO: Wrap error
+	blk.Responses = make([]MsearchResponseItem, 0, queueCnt)
+
+	if err = json.Unmarshal(buf.Bytes(), &blk); err != nil {
+		log.Error().Err(err).Str("mod", kModBulk).Msg("Unmarshal error")
+		return err
 	}
 
 	log.Trace().
@@ -125,7 +144,9 @@ func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 		Str("mod", kModBulk).
 		Dur("rtt", time.Since(start)).
 		Int("took", blk.Took).
-		Int("sz", len(blk.Responses)).
+		Int("cnt", len(blk.Responses)).
+		Int("bufSz", bufSz).
+		Int64("bodySz", bodySz).
 		Msg("flushSearch")
 
 	if len(blk.Responses) != queueCnt {
@@ -138,15 +159,16 @@ func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 	// up the stack will fail.
 
 	n := queue.head
-	for _, response := range blk.Responses {
+	for i := range blk.Responses {
 		next := n.next // 'n' is invalid immediately on channel send
 
-		cResponse := response
+		response := &blk.Responses[i]
+
 		select {
 		case n.ch <- respT{
 			err:  response.deriveError(),
 			idx:  n.idx,
-			data: &cResponse,
+			data: response,
 		}:
 		default:
 			panic("Unexpected blocked response channel on flushSearch")
