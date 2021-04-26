@@ -32,7 +32,7 @@ type BulkIndexerResponseItem struct {
 	//		Failed     int `json:"failed"`
 	//	} `json:"_shards"`
 
-	Error es.ErrorT `json:"error,omitempty"`
+	Error *es.ErrorT `json:"error,omitempty"`
 }
 
 // Elastic returns shape: map[action]BulkIndexerResponseItem.
@@ -40,9 +40,9 @@ type BulkIndexerResponseItem struct {
 // case when there is only one legal key.
 func (bi *BulkIndexerResponseItem) UnmarshalJSON(data []byte) error {
 	type innerT struct {
-		DocumentID string    `json:"_id"`
-		Status     int       `json:"status"`
-		Error      es.ErrorT `json:"error,omitempty"`
+		DocumentID string     `json:"_id"`
+		Status     int        `json:"status"`
+		Error      *es.ErrorT `json:"error,omitempty"`
 	}
 
 	var w struct {
@@ -116,7 +116,7 @@ type MsearchResponseItem struct {
 	Hits         es.HitsT                  `json:"hits"`
 	Aggregations map[string]es.Aggregation `json:"aggregations,omitempty"`
 
-	Error es.ErrorT `json:"error,omitempty"`
+	Error *es.ErrorT `json:"error,omitempty"`
 }
 
 type MsearchResponse struct {

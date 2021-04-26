@@ -293,9 +293,9 @@ func benchmarkCreate(n int, b *testing.B) {
 	wait.Wait()
 }
 
-func BenchmarkCreate_1(b *testing.B)    { benchmarkCreate(1, b) }
-func BenchmarkCreate_64(b *testing.B)   { benchmarkCreate(64, b) }
-func BenchmarkCreate_8192(b *testing.B) { benchmarkCreate(8192, b) }
+func BenchmarkCreate_1(b *testing.B)     { benchmarkCreate(1, b) }
+func BenchmarkCreate_64(b *testing.B)    { benchmarkCreate(64, b) }
+func BenchmarkCreate_8192(b *testing.B)  { benchmarkCreate(8192, b) }
 func BenchmarkCreate_16384(b *testing.B) { benchmarkCreate(16384, b) }
 func BenchmarkCreate_37268(b *testing.B) { benchmarkCreate(37268, b) }
 func BenchmarkCreate_65536(b *testing.B) { benchmarkCreate(65536, b) }
@@ -365,9 +365,9 @@ func benchmarkCRUD(n int, b *testing.B) {
 	wait.Wait()
 }
 
-func BenchmarkCRUD_1(b *testing.B)    { benchmarkCRUD(1, b) }
-func BenchmarkCRUD_64(b *testing.B)   { benchmarkCRUD(64, b) }
-func BenchmarkCRUD_8192(b *testing.B) { benchmarkCRUD(8192, b) }
+func BenchmarkCRUD_1(b *testing.B)     { benchmarkCRUD(1, b) }
+func BenchmarkCRUD_64(b *testing.B)    { benchmarkCRUD(64, b) }
+func BenchmarkCRUD_8192(b *testing.B)  { benchmarkCRUD(8192, b) }
 func BenchmarkCRUD_16384(b *testing.B) { benchmarkCreate(16384, b) }
 func BenchmarkCRUD_37268(b *testing.B) { benchmarkCreate(37268, b) }
 func BenchmarkCRUD_65536(b *testing.B) { benchmarkCreate(65536, b) }
