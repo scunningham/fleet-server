@@ -6,6 +6,7 @@ package bulk
 
 import (
 	"github.com/rs/zerolog"
+	"strconv"
 	"time"
 )
 
@@ -14,7 +15,7 @@ import (
 
 type optionsT struct {
 	Refresh         bool
-	RetryOnConflict int
+	RetryOnConflict string
 	Indices         []string
 }
 
@@ -28,7 +29,7 @@ func WithRefresh() Opt {
 
 func WithRetryOnConflict(n int) Opt {
 	return func(opt *optionsT) {
-		opt.RetryOnConflict = n
+		opt.RetryOnConflict = strconv.Itoa(n)
 	}
 }
 

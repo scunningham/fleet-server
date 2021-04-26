@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
@@ -84,7 +83,7 @@ func (b *Bulker) writeMget(buf *Buf, index, id string) error {
 	return nil
 }
 
-func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id string, retry int) error {
+func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id, retry string) error {
 	if err := b.validateMeta(index, id); err != nil {
 		return err
 	}
@@ -97,9 +96,9 @@ func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id string, retry int) er
 		buf.WriteString(id)
 		buf.WriteString(`",`)
 	}
-	if retry > 0 {
+	if retry != "" {
 		buf.WriteString(`"retry_on_conflict":`)
-		buf.WriteString(strconv.Itoa(retry))
+		buf.WriteString(retry)
 		buf.WriteString(`,`)
 	}
 
@@ -123,9 +122,13 @@ func (b *Bulker) writeBulkBody(buf *Buf, body []byte) error {
 	return nil
 }
 
-func (b *Bulker) calcBulkSz(action, idx, id string, body []byte) int {
+func (b *Bulker) calcBulkSz(action, idx, id, retry string, body []byte) int {
 	const kFraming = 19
 	metaSz := kFraming + len(action) + len(idx)
+
+	if retry != "" {
+		metaSz += 21 + len(retry)
+	}
 
 	var idSz int
 	if id != "" {

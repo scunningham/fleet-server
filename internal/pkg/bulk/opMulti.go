@@ -47,7 +47,7 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []Mult
 	// O(n) Determine how much space we need
 	var byteCnt int
 	for _, op := range ops {
-		byteCnt += b.calcBulkSz(actionStr, op.Index, op.Id, op.Body)
+		byteCnt += b.calcBulkSz(actionStr, op.Index, op.Id, opt.RetryOnConflict, op.Body)
 	}
 
 	// Create one bulk buffer to serialize each piece.
