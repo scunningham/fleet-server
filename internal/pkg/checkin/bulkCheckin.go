@@ -1,0 +1,201 @@
+// Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+// or more contributor license agreements. Licensed under the Elastic License;
+// you may not use this file except in compliance with the Elastic License.
+
+package checkin
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/elastic/fleet-server/v7/internal/pkg/bulk"
+	"github.com/elastic/fleet-server/v7/internal/pkg/dl"
+	"github.com/elastic/fleet-server/v7/internal/pkg/sqn"
+
+	"github.com/rs/zerolog/log"
+)
+
+type Fields = bulk.UpdateFields
+
+const defaultFlushInterval = 10 * time.Second
+
+type optionsT struct {
+	flushInterval time.Duration
+}
+
+type Opt func(*optionsT)
+
+func WithFlushInterval(d time.Duration) Opt {
+	return func(opt *optionsT) {
+		opt.flushInterval = d
+	}
+}
+
+type PendingData struct {
+	ts     string
+	fields Fields
+	seqNo  sqn.SeqNo
+}
+
+type BulkCheckin struct {
+	opts    optionsT
+	bulker  bulk.Bulk
+	mut     sync.Mutex
+	pending map[string]PendingData
+
+	ts   string
+	unix int64
+}
+
+func NewBulkCheckin(bulker bulk.Bulk, opts ...Opt) *BulkCheckin {
+
+	parsedOpts := parseOpts(opts...)
+
+	return &BulkCheckin{
+		opts:    parsedOpts,
+		bulker:  bulker,
+		pending: make(map[string]PendingData),
+	}
+}
+
+func parseOpts(opts ...Opt) optionsT {
+
+	outOpts := optionsT{
+		flushInterval: defaultFlushInterval,
+	}
+
+	for _, f := range opts {
+		f(&outOpts)
+	}
+
+	return outOpts
+}
+
+// Generate and cache timestamp on seconds change.
+// Avoid thousands of formats of an identical string.
+func (bc *BulkCheckin) timestamp() string {
+
+	bc.mut.Lock()
+	defer bc.mut.Unlock()
+
+	now := time.Now()
+	if now.Unix() != bc.unix {
+		bc.unix = now.Unix()
+		bc.ts = now.UTC().Format(time.RFC3339)
+	}
+
+	return bc.ts
+}
+
+func (bc *BulkCheckin) CheckIn(id string, fields Fields, seqno sqn.SeqNo) error {
+
+	ts := bc.timestamp()
+
+	pending := PendingData{
+		ts:     ts,
+		fields: fields,
+		seqNo:  seqno,
+	}
+
+	bc.mut.Lock()
+	bc.pending[id] = pending
+	bc.mut.Unlock()
+	return nil
+}
+
+func (bc *BulkCheckin) Run(ctx context.Context) error {
+
+	tick := time.NewTicker(bc.opts.flushInterval)
+
+	var err error
+LOOP:
+	for {
+		select {
+		case <-tick.C:
+			if err = bc.flush(ctx); err != nil {
+				log.Error().Err(err).Msg("Eat bulk checkin error; Keep on truckin'")
+				err = nil
+			}
+
+		case <-ctx.Done():
+			err = ctx.Err()
+			break LOOP
+		}
+	}
+
+	return err
+}
+
+func (bc *BulkCheckin) flush(ctx context.Context) error {
+	start := time.Now()
+
+	bc.mut.Lock()
+	pending := bc.pending
+	bc.pending = make(map[string]PendingData, len(pending))
+	bc.mut.Unlock()
+
+	if len(pending) == 0 {
+		return nil
+	}
+
+	var needRefresh bool
+	updates := make([]bulk.MultiOp, 0, len(pending))
+
+	// Local map used to avoid realloc map in loop
+	stubFields := make(Fields)
+
+	nowTimestamp := start.UTC().Format(time.RFC3339)
+	for id, pendingData := range pending {
+
+		// Start with fields passed in
+		fields := pendingData.fields
+
+		if fields == nil {
+			delete(stubFields, dl.FieldActionSeqNo) // Fix up stub in case we set on last spin
+			fields = stubFields
+		}
+
+		// Set the checkin timestamp
+		fields[dl.FieldLastCheckin] = pendingData.ts
+
+		// Set "updated_at" to the current timestamp
+		fields[dl.FieldUpdatedAt] = nowTimestamp
+
+		// If seqNo changed, set the field appropriately
+		if pendingData.seqNo.IsSet() {
+			fields[dl.FieldActionSeqNo] = pendingData.seqNo
+
+			// Only refresh if seqNo changed; dropping metadata not important.
+			needRefresh = true
+		}
+
+		body, err := fields.Marshal()
+
+		if err != nil {
+			return err
+		}
+
+		updates = append(updates, bulk.MultiOp{
+			Id:    id,
+			Body:  body,
+			Index: dl.FleetAgents,
+		})
+	}
+
+	var opts []bulk.Opt
+	if needRefresh {
+		opts = append(opts, bulk.WithRefresh())
+	}
+
+	_, err := bc.bulker.MUpdate(ctx, updates, opts...)
+
+	log.Trace().
+		Err(err).
+		Dur("rtt", time.Since(start)).
+		Int("cnt", len(updates)).
+		Bool("refresh", needRefresh).
+		Msg("Flush updates")
+
+	return err
+}

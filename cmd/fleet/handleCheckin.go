@@ -18,6 +18,7 @@ import (
 	"github.com/elastic/fleet-server/v7/internal/pkg/action"
 	"github.com/elastic/fleet-server/v7/internal/pkg/bulk"
 	"github.com/elastic/fleet-server/v7/internal/pkg/cache"
+	"github.com/elastic/fleet-server/v7/internal/pkg/checkin"
 	"github.com/elastic/fleet-server/v7/internal/pkg/config"
 	"github.com/elastic/fleet-server/v7/internal/pkg/dl"
 	"github.com/elastic/fleet-server/v7/internal/pkg/limit"
@@ -71,7 +72,7 @@ type CheckinT struct {
 	verCon version.Constraints
 	cfg    *config.Server
 	cache  cache.Cache
-	bc     *BulkCheckin
+	bc     *checkin.BulkCheckin
 	pm     policy.Monitor
 	gcp    monitor.GlobalCheckpointProvider
 	ad     *action.Dispatcher
@@ -84,7 +85,7 @@ func NewCheckinT(
 	verCon version.Constraints,
 	cfg *config.Server,
 	c cache.Cache,
-	bc *BulkCheckin,
+	bc *checkin.BulkCheckin,
 	pm policy.Monitor,
 	gcp monitor.GlobalCheckpointProvider,
 	ad *action.Dispatcher,
@@ -220,7 +221,7 @@ func (ct *CheckinT) _handleCheckin(w http.ResponseWriter, r *http.Request, id st
 				log.Trace().Msg("fire long poll")
 				break LOOP
 			case <-tick.C:
-				ct.bc.CheckIn(agent.Id, nil, seqno)
+				ct.bc.CheckIn(agent.Id, nil, nil)
 			}
 		}
 	}
@@ -511,7 +512,7 @@ func findAgentByApiKeyId(ctx context.Context, bulker bulk.Bulk, id string) (*mod
 
 // parseMeta compares the agent and the request local_metadata content
 // and returns fields to update the agent record or nil
-func parseMeta(agent *model.Agent, req *CheckinRequest) (fields Fields, err error) {
+func parseMeta(agent *model.Agent, req *CheckinRequest) (fields checkin.Fields, err error) {
 	// Quick comparison first
 	if bytes.Equal(req.LocalMeta, agent.LocalMetadata) {
 		log.Trace().Msg("quick comparing local metadata is equal")
@@ -519,8 +520,8 @@ func parseMeta(agent *model.Agent, req *CheckinRequest) (fields Fields, err erro
 	}
 
 	// Compare local_metadata content and update if different
-	var reqLocalMeta Fields
-	var agentLocalMeta Fields
+	var reqLocalMeta checkin.Fields
+	var agentLocalMeta checkin.Fields
 	err = json.Unmarshal(req.LocalMeta, &reqLocalMeta)
 	if err != nil {
 		return nil, err
@@ -534,7 +535,7 @@ func parseMeta(agent *model.Agent, req *CheckinRequest) (fields Fields, err erro
 		log.Trace().RawJSON("oldLocalMeta", agent.LocalMetadata).RawJSON("newLocalMeta", req.LocalMeta).Msg("local metadata not equal")
 		log.Info().RawJSON("req.LocalMeta", req.LocalMeta).Msg("applying new local metadata")
 		fields = map[string]interface{}{
-			FieldLocalMetadata: req.LocalMeta,
+			dl.FieldLocalMetadata: req.LocalMeta,
 		}
 	}
 	return fields, nil
