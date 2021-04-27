@@ -522,7 +522,7 @@ func parseMeta(agent *model.Agent, req *CheckinRequest) ([]byte, error) {
 	}
 
 	// Deserialize the request metadata
-	var reqLocalMeta checkin.Fields
+	var reqLocalMeta interface{}
 	if err := json.Unmarshal(req.LocalMeta, &reqLocalMeta); err != nil {
 		return nil, err
 	}
@@ -533,7 +533,7 @@ func parseMeta(agent *model.Agent, req *CheckinRequest) ([]byte, error) {
 	}
 
 	// Deserialize the agent's metadata copy
-	var agentLocalMeta checkin.Fields
+	var agentLocalMeta interface{}
 	if err := json.Unmarshal(agent.LocalMetadata, &agentLocalMeta); err != nil {
 		return nil, err
 	}

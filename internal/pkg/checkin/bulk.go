@@ -17,8 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type Fields = bulk.UpdateFields
-
 const defaultFlushInterval = 10 * time.Second
 
 type optionsT struct {
@@ -38,7 +36,7 @@ type extraT struct {
 	seqNo sqn.SeqNo
 }
 
-type PendingData struct {
+type pendingT struct {
 	ts    string
 	extra *extraT
 }
@@ -47,7 +45,7 @@ type BulkCheckin struct {
 	opts    optionsT
 	bulker  bulk.Bulk
 	mut     sync.Mutex
-	pending map[string]PendingData
+	pending map[string]pendingT
 
 	ts   string
 	unix int64
@@ -59,7 +57,7 @@ func NewBulkCheckin(bulker bulk.Bulk, opts ...Opt) *BulkCheckin {
 	return &BulkCheckin{
 		opts:    parsedOpts,
 		bulker:  bulker,
-		pending: make(map[string]PendingData),
+		pending: make(map[string]pendingT),
 	}
 }
 
@@ -107,7 +105,7 @@ func (bc *BulkCheckin) CheckIn(id string, meta []byte, seqno sqn.SeqNo) error {
 
 	bc.mut.Lock()
 
-	bc.pending[id] = PendingData{
+	bc.pending[id] = pendingT{
 		ts:    bc.timestamp(),
 		extra: extra,
 	}
@@ -144,7 +142,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 
 	bc.mut.Lock()
 	pending := bc.pending
-	bc.pending = make(map[string]PendingData, len(pending))
+	bc.pending = make(map[string]pendingT, len(pending))
 	bc.mut.Unlock()
 
 	if len(pending) == 0 {
@@ -169,7 +167,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			var ok bool
 			body, ok = simpleCache[pendingData.ts]
 			if !ok {
-				fields := Fields{
+				fields := bulk.UpdateFields{
 					dl.FieldLastCheckin: pendingData.ts,
 					dl.FieldUpdatedAt:   nowTimestamp,
 				}
@@ -180,7 +178,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			}
 		} else {
 
-			fields := Fields{
+			fields := bulk.UpdateFields{
 				dl.FieldLastCheckin: pendingData.ts, // Set the checkin timestamp
 				dl.FieldUpdatedAt:   nowTimestamp,   // Set "updated_at" to the current timestamp
 			}
