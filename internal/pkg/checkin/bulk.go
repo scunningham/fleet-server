@@ -134,41 +134,58 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 		return nil
 	}
 
-	var needRefresh bool
 	updates := make([]bulk.MultiOp, 0, len(pending))
 
-	// Local map used to avoid realloc map in loop
-	stubFields := make(Fields)
+	simpleCache := make(map[string][]byte)
 
 	nowTimestamp := start.UTC().Format(time.RFC3339)
+
+	var err error
+	var needRefresh bool
 	for id, pendingData := range pending {
 
-		// Start with fields passed in
-		fields := pendingData.fields
+		// In the simple case, there are no fields and no seqNo.
+		// When that is true, we can reuse an already generated
+		// JSON body containing just the timestamp updates.
+		var body []byte
+		if pendingData.fields == nil && !pendingData.seqNo.IsSet() {
+			var ok bool
+			body, ok = simpleCache[pendingData.ts]
+			if !ok {
+				fields := Fields{
+					dl.FieldLastCheckin: pendingData.ts,
+					dl.FieldUpdatedAt:   nowTimestamp,
+				}
+				if body, err = fields.Marshal(); err != nil {
+					return err
+				}
+				simpleCache[pendingData.ts] = body
+			}
+		} else {
 
-		if fields == nil {
-			delete(stubFields, dl.FieldActionSeqNo) // Fix up stub in case we set on last spin
-			fields = stubFields
-		}
+			// Start with fields passed in
+			fields := pendingData.fields
+			if fields == nil {
+				fields = make(Fields)
+			}
 
-		// Set the checkin timestamp
-		fields[dl.FieldLastCheckin] = pendingData.ts
+			// Set the checkin timestamp
+			fields[dl.FieldLastCheckin] = pendingData.ts
 
-		// Set "updated_at" to the current timestamp
-		fields[dl.FieldUpdatedAt] = nowTimestamp
+			// Set "updated_at" to the current timestamp
+			fields[dl.FieldUpdatedAt] = nowTimestamp
 
-		// If seqNo changed, set the field appropriately
-		if pendingData.seqNo.IsSet() {
-			fields[dl.FieldActionSeqNo] = pendingData.seqNo
+			// If seqNo changed, set the field appropriately
+			if pendingData.seqNo.IsSet() {
+				fields[dl.FieldActionSeqNo] = pendingData.seqNo
 
-			// Only refresh if seqNo changed; dropping metadata not important.
-			needRefresh = true
-		}
+				// Only refresh if seqNo changed; dropping metadata not important.
+				needRefresh = true
+			}
 
-		body, err := fields.Marshal()
-
-		if err != nil {
-			return err
+			if body, err = fields.Marshal(); err != nil {
+				return err
+			}
 		}
 
 		updates = append(updates, bulk.MultiOp{
@@ -183,7 +200,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 		opts = append(opts, bulk.WithRefresh())
 	}
 
-	_, err := bc.bulker.MUpdate(ctx, updates, opts...)
+	_, err = bc.bulker.MUpdate(ctx, updates, opts...)
 
 	log.Trace().
 		Err(err).
