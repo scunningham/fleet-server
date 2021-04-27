@@ -33,10 +33,14 @@ func WithFlushInterval(d time.Duration) Opt {
 	}
 }
 
-type PendingData struct {
-	ts    string
+type extraT struct {
 	meta  []byte
 	seqNo sqn.SeqNo
+}
+
+type PendingData struct {
+	ts    string
+	extra *extraT
 }
 
 type BulkCheckin struct {
@@ -90,12 +94,22 @@ func (bc *BulkCheckin) timestamp() string {
 // so do not use after passing in.
 func (bc *BulkCheckin) CheckIn(id string, meta []byte, seqno sqn.SeqNo) error {
 
+	// Separate out the extra data to minimize
+	// the memory footprint of the 90% case of just
+	// updating the timestamp.
+	var extra *extraT
+	if meta != nil || seqno.IsSet() {
+		extra = &extraT{
+			meta:  meta,
+			seqNo: seqno,
+		}
+	}
+
 	bc.mut.Lock()
 
 	bc.pending[id] = PendingData{
 		ts:    bc.timestamp(),
-		meta:  meta,
-		seqNo: seqno,
+		extra: extra,
 	}
 
 	bc.mut.Unlock()
@@ -151,7 +165,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 		// When that is true, we can reuse an already generated
 		// JSON body containing just the timestamp updates.
 		var body []byte
-		if pendingData.meta == nil && !pendingData.seqNo.IsSet() {
+		if pendingData.extra == nil {
 			var ok bool
 			body, ok = simpleCache[pendingData.ts]
 			if !ok {
@@ -172,13 +186,13 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			}
 
 			// Update local metadata if provided
-			if pendingData.meta != nil {
-				fields[dl.FieldLocalMetadata] = json.RawMessage(pendingData.meta)
+			if pendingData.extra.meta != nil {
+				fields[dl.FieldLocalMetadata] = json.RawMessage(pendingData.extra.meta)
 			}
 
 			// If seqNo changed, set the field appropriately
-			if pendingData.seqNo.IsSet() {
-				fields[dl.FieldActionSeqNo] = pendingData.seqNo
+			if pendingData.extra.seqNo.IsSet() {
+				fields[dl.FieldActionSeqNo] = pendingData.extra.seqNo
 
 				// Only refresh if seqNo changed; dropping metadata not important.
 				needRefresh = true
@@ -187,8 +201,6 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			if body, err = fields.Marshal(); err != nil {
 				return err
 			}
-
-			log.Info().RawJSON("before", pendingData.meta).RawJSON("body", body).Msg("WTF")
 		}
 
 		updates = append(updates, bulk.MultiOp{
