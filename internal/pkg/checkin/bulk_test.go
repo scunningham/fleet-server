@@ -7,7 +7,6 @@ package checkin
 import (
 	"context"
 	"testing"
-	"time"
 
 	tst "github.com/elastic/fleet-server/v7/internal/pkg/testing"
 	"github.com/rs/xid"
@@ -24,8 +23,7 @@ func benchmarkBulk(n int, flush bool, b *testing.B) {
 
 	var mockBulk tst.MockBulk
 
-	dur := time.Millisecond
-	bc := NewBulkCheckin(mockBulk, WithFlushInterval(dur))
+	bc := NewBulkCheckin(mockBulk)
 
 	ids := make([]string, 0, n)
 	for i := 0; i < n; i++ {
