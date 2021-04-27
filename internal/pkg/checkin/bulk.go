@@ -49,7 +49,6 @@ type BulkCheckin struct {
 }
 
 func NewBulkCheckin(bulker bulk.Bulk, opts ...Opt) *BulkCheckin {
-
 	parsedOpts := parseOpts(opts...)
 
 	return &BulkCheckin{
@@ -76,9 +75,7 @@ func parseOpts(opts ...Opt) optionsT {
 // Avoid thousands of formats of an identical string.
 func (bc *BulkCheckin) timestamp() string {
 
-	bc.mut.Lock()
-	defer bc.mut.Unlock()
-
+	// WARNING: Expects mutex locked.
 	now := time.Now()
 	if now.Unix() != bc.unix {
 		bc.unix = now.Unix()
@@ -90,16 +87,14 @@ func (bc *BulkCheckin) timestamp() string {
 
 func (bc *BulkCheckin) CheckIn(id string, fields Fields, seqno sqn.SeqNo) error {
 
-	ts := bc.timestamp()
+	bc.mut.Lock()
 
-	pending := PendingData{
-		ts:     ts,
+	bc.pending[id] = PendingData{
+		ts:     bc.timestamp(),
 		fields: fields,
 		seqNo:  seqno,
 	}
 
-	bc.mut.Lock()
-	bc.pending[id] = pending
 	bc.mut.Unlock()
 	return nil
 }

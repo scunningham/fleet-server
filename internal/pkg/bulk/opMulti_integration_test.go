@@ -23,7 +23,7 @@ func benchmarkMultiUpdate(n int, b *testing.B) {
 	l := zerolog.GlobalLevel()
 	defer zerolog.SetGlobalLevel(l)
 
-	//	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
 
 	ctx, cn := context.WithCancel(context.Background())
 	defer cn()
