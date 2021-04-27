@@ -152,7 +152,7 @@ func (ct *CheckinT) _handleCheckin(w http.ResponseWriter, r *http.Request, id st
 	cntCheckin.bodyIn.Add(readCounter.Count())
 
 	// Compare local_metadata content and update if different
-	fields, err := parseMeta(agent, &req)
+	rawMeta, err := parseMeta(agent, &req)
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (ct *CheckinT) _handleCheckin(w http.ResponseWriter, r *http.Request, id st
 	defer longPoll.Stop()
 
 	// Intial update on checkin, and any user fields that might have changed
-	ct.bc.CheckIn(agent.Id, fields, seqno)
+	ct.bc.CheckIn(agent.Id, rawMeta, seqno)
 
 	// Initial fetch for pending actions
 	var (
@@ -512,31 +512,50 @@ func findAgentByApiKeyId(ctx context.Context, bulker bulk.Bulk, id string) (*mod
 
 // parseMeta compares the agent and the request local_metadata content
 // and returns fields to update the agent record or nil
-func parseMeta(agent *model.Agent, req *CheckinRequest) (fields checkin.Fields, err error) {
-	// Quick comparison first
+func parseMeta(agent *model.Agent, req *CheckinRequest) ([]byte, error) {
+
+	// Quick comparison first; compare the JSON payloads.
+	// If the data is not consistently normalized, this short-circuit will not work.
 	if bytes.Equal(req.LocalMeta, agent.LocalMetadata) {
 		log.Trace().Msg("quick comparing local metadata is equal")
 		return nil, nil
 	}
 
-	// Compare local_metadata content and update if different
+	// Deserialize the request metadata
 	var reqLocalMeta checkin.Fields
-	var agentLocalMeta checkin.Fields
-	err = json.Unmarshal(req.LocalMeta, &reqLocalMeta)
-	if err != nil {
-		return nil, err
-	}
-	err = json.Unmarshal(agent.LocalMetadata, &agentLocalMeta)
-	if err != nil {
+	if err := json.Unmarshal(req.LocalMeta, &reqLocalMeta); err != nil {
 		return nil, err
 	}
 
-	if reqLocalMeta != nil && !reflect.DeepEqual(reqLocalMeta, agentLocalMeta) {
-		log.Trace().RawJSON("oldLocalMeta", agent.LocalMetadata).RawJSON("newLocalMeta", req.LocalMeta).Msg("local metadata not equal")
-		log.Info().RawJSON("req.LocalMeta", req.LocalMeta).Msg("applying new local metadata")
-		fields = map[string]interface{}{
-			dl.FieldLocalMetadata: req.LocalMeta,
-		}
+	// If empty, don't step on existing data
+	if reqLocalMeta == nil {
+		return nil, nil
 	}
-	return fields, nil
+
+	// Deserialize the agent's metadata copy
+	var agentLocalMeta checkin.Fields
+	if err := json.Unmarshal(agent.LocalMetadata, &agentLocalMeta); err != nil {
+		return nil, err
+	}
+
+	var outMeta []byte
+
+	// Compare the deserialized meta structures and return the bytes to update if different
+	if !reflect.DeepEqual(reqLocalMeta, agentLocalMeta) {
+
+		log.Trace().
+			Str("agentId", agent.Id).
+			RawJSON("oldLocalMeta", agent.LocalMetadata).
+			RawJSON("newLocalMeta", req.LocalMeta).
+			Msg("local metadata not equal")
+
+		log.Info().
+			Str("agentId", agent.Id).
+			RawJSON("req.LocalMeta", req.LocalMeta).
+			Msg("applying new local metadata")
+
+		outMeta = req.LocalMeta
+	}
+
+	return outMeta, nil
 }

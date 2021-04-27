@@ -6,6 +6,7 @@ package checkin
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -33,9 +34,9 @@ func WithFlushInterval(d time.Duration) Opt {
 }
 
 type PendingData struct {
-	ts     string
-	fields Fields
-	seqNo  sqn.SeqNo
+	ts    string
+	meta  []byte
+	seqNo sqn.SeqNo
 }
 
 type BulkCheckin struct {
@@ -85,14 +86,16 @@ func (bc *BulkCheckin) timestamp() string {
 	return bc.ts
 }
 
-func (bc *BulkCheckin) CheckIn(id string, fields Fields, seqno sqn.SeqNo) error {
+// WARNING: BulkCheckin will take ownership of fields,
+// so do not use after passing in.
+func (bc *BulkCheckin) CheckIn(id string, meta []byte, seqno sqn.SeqNo) error {
 
 	bc.mut.Lock()
 
 	bc.pending[id] = PendingData{
-		ts:     bc.timestamp(),
-		fields: fields,
-		seqNo:  seqno,
+		ts:    bc.timestamp(),
+		meta:  meta,
+		seqNo: seqno,
 	}
 
 	bc.mut.Unlock()
@@ -148,7 +151,7 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 		// When that is true, we can reuse an already generated
 		// JSON body containing just the timestamp updates.
 		var body []byte
-		if pendingData.fields == nil && !pendingData.seqNo.IsSet() {
+		if pendingData.meta == nil && !pendingData.seqNo.IsSet() {
 			var ok bool
 			body, ok = simpleCache[pendingData.ts]
 			if !ok {
@@ -163,17 +166,15 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			}
 		} else {
 
-			// Start with fields passed in
-			fields := pendingData.fields
-			if fields == nil {
-				fields = make(Fields)
+			fields := Fields{
+				dl.FieldLastCheckin: pendingData.ts, // Set the checkin timestamp
+				dl.FieldUpdatedAt:   nowTimestamp,   // Set "updated_at" to the current timestamp
 			}
 
-			// Set the checkin timestamp
-			fields[dl.FieldLastCheckin] = pendingData.ts
-
-			// Set "updated_at" to the current timestamp
-			fields[dl.FieldUpdatedAt] = nowTimestamp
+			// Update local metadata if provided
+			if pendingData.meta != nil {
+				fields[dl.FieldLocalMetadata] = json.RawMessage(pendingData.meta)
+			}
 
 			// If seqNo changed, set the field appropriately
 			if pendingData.seqNo.IsSet() {
@@ -186,6 +187,8 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 			if body, err = fields.Marshal(); err != nil {
 				return err
 			}
+
+			log.Info().RawJSON("before", pendingData.meta).RawJSON("body", body).Msg("WTF")
 		}
 
 		updates = append(updates, bulk.MultiOp{
