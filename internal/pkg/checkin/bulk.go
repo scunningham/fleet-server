@@ -36,6 +36,9 @@ type extraT struct {
 	seqNo sqn.SeqNo
 }
 
+// Minimize the size of this structure.
+// There will be 10's of thousands of items
+// in the map at any point.
 type pendingT struct {
 	ts    string
 	extra *extraT
@@ -185,6 +188,9 @@ func (bc *BulkCheckin) flush(ctx context.Context) error {
 
 			// Update local metadata if provided
 			if pendingData.extra.meta != nil {
+				// Surprise: The json encodeer compacts this raw JSON during
+				// the encode process, so there my be unexpected memory overhead:
+				// https://github.com/golang/go/blob/go1.16.3/src/encoding/json/encode.go#L499
 				fields[dl.FieldLocalMetadata] = json.RawMessage(pendingData.extra.meta)
 			}
 
