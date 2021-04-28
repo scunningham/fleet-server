@@ -2,7 +2,7 @@
 // or more contributor license agreements. Licensed under the Elastic License;
 // you may not use this file except in compliance with the Elastic License.
 
-package bulk
+package danger
 
 // Effectively golang's string builder with a Reset option
 
@@ -16,6 +16,10 @@ type Buf struct {
 
 func (b *Buf) Bytes() []byte {
 	return b.buf
+}
+
+func (b *Buf) Set(s []byte) {
+	b.buf = s
 }
 
 func (b *Buf) Len() int { return len(b.buf) }

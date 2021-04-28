@@ -38,7 +38,7 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []Mult
 
 	opt := b.parseOpts(opts...)
 
-	// Contract is that consumer never blocks, so much preallocate.
+	// Contract is that consumer never blocks, so must preallocate.
 	// Could consider making the response channel *respT to limit memory usage.
 	ch := make(chan respT, len(ops))
 
@@ -51,7 +51,10 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []Mult
 	}
 
 	// Create one bulk buffer to serialize each piece.
-	// This decreases pressure on the heap.
+	// This decreases pressure on the heap. If we calculculate wrong,
+	// the Buf objectect has the property that previously cached slices
+	// are still valid.  However, underestimating the buffer size
+	// can lead to mulitple copies, which undermines the optimization.
 	var bulkBuf Buf
 	bulkBuf.Grow(byteCnt)
 
@@ -71,11 +74,13 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []Mult
 			return nil, err
 		}
 
+		bodySlice := bulkBuf.Bytes()[bufIdx:]
+
 		bulk := &bulks[i]
 		bulk.ch = ch
 		bulk.idx = int32(i)
 		bulk.action = action
-		bulk.buf.buf = bulkBuf.buf[bufIdx:]
+		bulk.buf.Set(bodySlice)
 		if opt.Refresh {
 			bulk.flags.Set(flagRefresh)
 		}

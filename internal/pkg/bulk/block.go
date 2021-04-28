@@ -4,6 +4,12 @@
 
 package bulk
 
+import (
+	"github.com/elastic/fleet-server/v7/internal/pkg/danger"
+)
+
+type Buf = danger.Buf
+
 // bulkT is generally allocated in the bulk engines's 'blkPool'
 // However, the multiOp API's will allocate directly in large blocks.
 
