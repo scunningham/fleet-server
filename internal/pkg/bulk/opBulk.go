@@ -45,7 +45,7 @@ func (b *Bulker) Delete(ctx context.Context, index, id string, opts ...Opt) erro
 func (b *Bulker) waitBulkAction(ctx context.Context, action actionT, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
 	opt := b.parseOpts(opts...)
 
-	blk := b.NewBlk(action, opt)
+	blk := b.newBlk(action, opt)
 
 	// Serialize request
 	const kSlop = 64
@@ -64,7 +64,7 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action actionT, index, id s
 	if resp.err != nil {
 		return nil, resp.err
 	}
-	b.FreeBlk(blk)
+	b.freeBlk(blk)
 
 	r := resp.data.(*BulkIndexerResponseItem)
 	return r, nil

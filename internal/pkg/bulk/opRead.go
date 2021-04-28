@@ -23,7 +23,7 @@ const (
 func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error) {
 	opt := b.parseOpts(opts...)
 
-	blk := b.NewBlk(ActionRead, opt)
+	blk := b.newBlk(ActionRead, opt)
 
 	// Serialize request
 	const kSlop = 64
@@ -38,7 +38,7 @@ func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byt
 	if resp.err != nil {
 		return nil, resp.err
 	}
-	b.FreeBlk(blk)
+	b.freeBlk(blk)
 
 	// Interpret response, looking for generated id
 	r := resp.data.(*MgetResponseItem)

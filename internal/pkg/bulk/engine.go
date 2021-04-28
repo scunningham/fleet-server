@@ -336,7 +336,7 @@ func (b *Bulker) parseOpts(opts ...Opt) optionsT {
 	return opt
 }
 
-func (b *Bulker) NewBlk(action actionT, opts optionsT) *bulkT {
+func (b *Bulker) newBlk(action actionT, opts optionsT) *bulkT {
 	blk := b.blkPool.Get().(*bulkT)
 	blk.action = action
 	if opts.Refresh {
@@ -345,7 +345,7 @@ func (b *Bulker) NewBlk(action actionT, opts optionsT) *bulkT {
 	return blk
 }
 
-func (b *Bulker) FreeBlk(blk *bulkT) {
+func (b *Bulker) freeBlk(blk *bulkT) {
 	blk.reset()
 	b.blkPool.Put(blk)
 }

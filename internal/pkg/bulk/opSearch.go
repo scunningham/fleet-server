@@ -19,7 +19,7 @@ import (
 func (b *Bulker) Search(ctx context.Context, index string, body []byte, opts ...Opt) (*es.ResultT, error) {
 	opt := b.parseOpts(opts...)
 
-	blk := b.NewBlk(ActionSearch, opt)
+	blk := b.newBlk(ActionSearch, opt)
 
 	// Serialize request
 	const kSlop = 64
@@ -38,7 +38,7 @@ func (b *Bulker) Search(ctx context.Context, index string, body []byte, opts ...
 	if resp.err != nil {
 		return nil, resp.err
 	}
-	b.FreeBlk(blk)
+	b.freeBlk(blk)
 
 	// Interpret response
 	r := resp.data.(*MsearchResponseItem)
