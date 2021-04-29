@@ -8,6 +8,7 @@ package bulk
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 
 func benchmarkMultiUpdate(n int, b *testing.B) {
 	b.ReportAllocs()
+	defer (QuietLogger())()
 
 	l := zerolog.GlobalLevel()
 	defer zerolog.SetGlobalLevel(l)
@@ -67,10 +69,17 @@ func benchmarkMultiUpdate(n int, b *testing.B) {
 	}
 }
 
-func BenchmarkMultiUpdate_1(b *testing.B)      { benchmarkMultiUpdate(1, b) }
-func BenchmarkMultiUpdate_64(b *testing.B)     { benchmarkMultiUpdate(64, b) }
-func BenchmarkMultiUpdate_8192(b *testing.B)   { benchmarkMultiUpdate(8192, b) }
-func BenchmarkMultiUpdate_16384(b *testing.B)  { benchmarkMultiUpdate(16384, b) }
-func BenchmarkMultiUpdate_37268(b *testing.B)  { benchmarkMultiUpdate(37268, b) }
-func BenchmarkMultiUpdate_65536(b *testing.B)  { benchmarkMultiUpdate(65536, b) }
-func BenchmarkMultiUpdate_131072(b *testing.B) { benchmarkMultiUpdate(131072, b) }
+func BenchmarkMultiUpdate(b *testing.B) {
+
+	benchmarks := []int{1, 64, 8192, 37268, 131072}
+
+	for _, n := range benchmarks {
+
+		bindFunc := func(n int) func(b *testing.B) {
+			return func(b *testing.B) {
+				benchmarkMultiUpdate(n, b)
+			}
+		}
+		b.Run(strconv.Itoa(n), bindFunc(n))
+	}
+}
