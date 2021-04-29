@@ -7,11 +7,11 @@ package bulk
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/mailru/easyjson"
 	"github.com/rs/zerolog/log"
 )
 
@@ -21,7 +21,10 @@ const (
 )
 
 func (b *Bulker) Read(ctx context.Context, index, id string, opts ...Opt) ([]byte, error) {
-	opt := b.parseOpts(opts...)
+	var opt optionsT
+	if len(opts) > 0 {
+		opt = b.parseOpts(opts...)
+	}
 
 	blk := b.newBlk(ActionRead, opt)
 
@@ -108,7 +111,7 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 	var blk MgetResponse
 	blk.Items = make([]MgetResponseItem, 0, queueCnt)
 
-	if err = json.Unmarshal(buf.Bytes(), &blk); err != nil {
+	if err = easyjson.Unmarshal(buf.Bytes(), &blk); err != nil {
 		log.Error().Err(err).Str("mod", kModBulk).Msg("Unmarshal error")
 		return err
 	}

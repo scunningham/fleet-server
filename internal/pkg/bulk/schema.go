@@ -8,12 +8,49 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
+	"github.com/mailru/easyjson/opt"
 )
 
-type BulkIndexerResponse struct {
-	Took      int                       `json:"took"`
-	HasErrors bool                      `json:"errors"`
-	Items     []BulkIndexerResponseItem `json:"items,omitempty"`
+type bulkStubInner struct {
+	Status     opt.Int    `json:"status"`
+	DocumentID string     `json:"_id"`
+	Error      *es.ErrorT `json:"error,omitempty"`
+}
+
+type bulkStubItem struct {
+	Index  bulkStubInner `json:"index"`
+	Delete bulkStubInner `json:"delete"`
+	Create bulkStubInner `json:"create"`
+	Update bulkStubInner `json:"update"`
+}
+
+func (bi bulkStubItem) Choose() BulkIndexerResponseItem {
+	var ptr *bulkStubInner
+	switch {
+	case bi.Index.Status.Defined:
+		ptr = &bi.Index
+	case bi.Delete.Status.Defined:
+		ptr = &bi.Delete
+	case bi.Create.Status.Defined:
+		ptr = &bi.Create
+	case bi.Update.Status.Defined:
+		ptr = &bi.Update
+	default:
+		return BulkIndexerResponseItem{}
+	}
+
+	return BulkIndexerResponseItem{
+		ptr.DocumentID,
+		ptr.Status.V,
+		ptr.Error,
+	}
+}
+
+//easyjson:json
+type bulkIndexerResponse struct {
+	Took      int            `json:"took"`
+	HasErrors bool           `json:"errors"`
+	Items     []bulkStubItem `json:"items,omitempty"`
 }
 
 // Comment out fields we don't use; no point decoding.
@@ -78,6 +115,7 @@ func (bi *BulkIndexerResponseItem) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+//easyjson:json
 type MgetResponse struct {
 	Items []MgetResponseItem `json:"docs"`
 }
@@ -119,6 +157,7 @@ type MsearchResponseItem struct {
 	Error *es.ErrorT `json:"error,omitempty"`
 }
 
+//easyjson:json
 type MsearchResponse struct {
 	Responses []MsearchResponseItem `json:"responses"`
 	Took      int                   `json:"took"`

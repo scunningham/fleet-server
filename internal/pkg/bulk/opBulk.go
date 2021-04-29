@@ -7,11 +7,11 @@ package bulk
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/mailru/easyjson"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,7 +43,10 @@ func (b *Bulker) Delete(ctx context.Context, index, id string, opts ...Opt) erro
 }
 
 func (b *Bulker) waitBulkAction(ctx context.Context, action actionT, index, id string, body []byte, opts ...Opt) (*BulkIndexerResponseItem, error) {
-	opt := b.parseOpts(opts...)
+	var opt optionsT
+	if len(opts) > 0 {
+		opt = b.parseOpts(opts...)
+	}
 
 	blk := b.newBlk(action, opt)
 
@@ -208,11 +211,11 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 		return err
 	}
 
-	// prealloc slice
-	var blk BulkIndexerResponse
-	blk.Items = make([]BulkIndexerResponseItem, 0, queueCnt)
+	// prealloc slice, not sure this helps
+	var blk bulkIndexerResponse
+	blk.Items = make([]bulkStubItem, 0, queueCnt)
 
-	if err = json.Unmarshal(buf.Bytes(), &blk); err != nil {
+	if err = easyjson.Unmarshal(buf.Bytes(), &blk); err != nil {
 		log.Error().
 			Err(err).
 			Str("mod", kModBulk).
@@ -245,12 +248,12 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 	for i, _ := range blk.Items {
 		next := n.next // 'n' is invalid immediately on channel send
 
-		item := &blk.Items[i]
+		item := blk.Items[i].Choose()
 		select {
 		case n.ch <- respT{
 			err:  item.deriveError(),
 			idx:  n.idx,
-			data: item,
+			data: &item,
 		}:
 		default:
 			panic("Unexpected blocked response channel on flushBulk")

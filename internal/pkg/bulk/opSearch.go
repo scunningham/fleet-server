@@ -13,11 +13,15 @@ import (
 
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/mailru/easyjson"
 	"github.com/rs/zerolog/log"
 )
 
 func (b *Bulker) Search(ctx context.Context, index string, body []byte, opts ...Opt) (*es.ResultT, error) {
-	opt := b.parseOpts(opts...)
+	var opt optionsT
+	if len(opts) > 0 {
+		opt = b.parseOpts(opts...)
+	}
 
 	blk := b.newBlk(ActionSearch, opt)
 
@@ -135,7 +139,7 @@ func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 	var blk MsearchResponse
 	blk.Responses = make([]MsearchResponseItem, 0, queueCnt)
 
-	if err = json.Unmarshal(buf.Bytes(), &blk); err != nil {
+	if err = easyjson.Unmarshal(buf.Bytes(), &blk); err != nil {
 		log.Error().Err(err).Str("mod", kModBulk).Msg("Unmarshal error")
 		return err
 	}
