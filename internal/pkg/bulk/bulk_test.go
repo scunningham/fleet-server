@@ -339,7 +339,7 @@ func benchmarkMockBulk(n int, b *testing.B) {
 	go func() {
 		defer waitBulker.Done()
 		if err := bulker.Run(ctx, WithFlushThresholdCount(n)); err != context.Canceled {
-			b.Fatal(err)
+			b.Error(err)
 		}
 	}()
 
@@ -366,26 +366,26 @@ func benchmarkMockBulk(n int, b *testing.B) {
 				// Create
 				id, err := bulker.Create(ctx, index, "", sampleData)
 				if err != nil {
-					b.Fatal(err)
+					b.Error(err)
 				}
 
 				// Index
 				_, err = bulker.Index(ctx, index, id, sampleData)
 				if err != nil {
-					b.Fatal(err)
+					b.Error(err)
 				}
 
 				// Update
 				err = bulker.Update(ctx, index, id, fieldData)
 				if err != nil {
-					b.Fatal(err)
+					b.Error(err)
 				}
 
 				// Delete
 				err = bulker.Delete(ctx, index, id)
 				if err != nil {
 					log.Info().Str("index", index).Str("id", id).Msg("delete fail")
-					b.Fatal(err)
+					b.Error(err)
 				}
 			}
 		}()
