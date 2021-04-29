@@ -24,22 +24,154 @@ func TestBulkCreate(t *testing.T) {
 	ctx, cn := context.WithCancel(context.Background())
 	defer cn()
 
-	index, bulker := SetupIndexWithBulk(ctx, t, testPolicy)
+	index, bulker := SetupIndexWithBulk(ctx, t, testPolicy, WithFlushThresholdCount(1))
 
-	sample := NewRandomSample()
-
-	// Create
-	id, err := bulker.Create(ctx, index, "", sample.marshal(t))
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		Name  string
+		Index string
+		Id    string
+		Err   error
+	}{
+		{
+			Name:  "Empty Id",
+			Index: index,
+		},
+		{
+			Name:  "Simple Id",
+			Index: index,
+			Id:    "elastic",
+		},
+		{
+			Name:  "Single quoted Id",
+			Index: index,
+			Id:    `'singlequotes'`,
+		},
+		{
+			Name:  "Double quoted Id",
+			Index: index,
+			Id:    `"doublequotes"`,
+			Err:   ErrNoQuotes,
+		},
+		{
+			Name:  "Empty Index",
+			Index: "",
+			Err: es.ErrElastic{
+				Status: 500,
+				Type:   "string_index_out_of_bounds_exception",
+			},
+		},
+		{
+			Name:  "Unicode Index 豆腐",
+			Index: string([]byte{0xe8, 0xb1, 0x86, 0xe8, 0x85, 0x90}),
+		},
+		{
+			Name:  "Invalid utf-8",
+			Index: string([]byte{0xfe, 0xfe, 0xff, 0xff}),
+			Err: es.ErrElastic{
+				Status: 400,
+				Type:   "json_parse_exception",
+			},
+		},
+		{
+			Name:  "Malformed Index Uppercase",
+			Index: "UPPERCASE",
+			Err: es.ErrElastic{
+				Status: 400,
+				Type:   "invalid_index_name_exception",
+			},
+		},
+		{
+			Name:  "Malformed Index underscore",
+			Index: "_nope",
+			Err: es.ErrElastic{
+				Status: 400,
+				Type:   "invalid_index_name_exception",
+			},
+		},
 	}
 
-	// Read
-	var dst testT
-	dst.read(t, bulker, ctx, index, id)
-	diff := cmp.Diff(sample, dst)
-	if diff != "" {
-		t.Fatal(diff)
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+
+			sample := NewRandomSample()
+			sampleData := sample.marshal(t)
+
+			// Create
+			id, err := bulker.Create(ctx, test.Index, test.Id, sampleData)
+			if !EqualElastic(test.Err, err) {
+				t.Fatal(err)
+			}
+			if err != nil {
+				return
+			}
+
+			if test.Id != "" && id != test.Id {
+				t.Error("Expected specified id")
+			} else if id == "" {
+				t.Error("Expected non-empty id")
+			}
+
+			// Read
+			var dst testT
+			dst.read(t, bulker, ctx, test.Index, id)
+			diff := cmp.Diff(sample, dst)
+			if diff != "" {
+				t.Fatal(diff)
+			}
+		})
+	}
+}
+
+func TestBulkCreateBody(t *testing.T) {
+	ctx, cn := context.WithCancel(context.Background())
+	defer cn()
+
+	index, bulker := SetupIndexWithBulk(ctx, t, testPolicy, WithFlushThresholdCount(1))
+
+	tests := []struct {
+		Name string
+		Body []byte
+		Err  error
+	}{
+		{
+			"Empty Body",
+			nil,
+			nil,
+		},
+		{
+			"Malformed Body",
+			[]byte("{nope}"),
+			es.ErrInvalidBody,
+		},
+		{
+			"Overflow",
+			[]byte(`{"overflow": 99999999999999999999}`),
+			es.ErrElastic{
+				Status: 400,
+				Type:   "mapper_parsing_exception",
+			},
+		},
+		{
+			"Invalid utf-8",
+			[]byte{0x7b, 0x22, 0x6f, 0x6b, 0x22, 0x3a, 0x22, 0xfe, 0xfe, 0xff, 0xff, 0x22, 0x7d}, // {"ok":"${BADUTF8}"}
+			es.ErrElastic{
+				Status: 400,
+				Type:   "mapper_parsing_exception",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+
+			_, err := bulker.Create(ctx, index, "", test.Body)
+			if !EqualElastic(test.Err, err) {
+				t.Fatal(err)
+			}
+			if err != nil {
+				return
+			}
+		})
 	}
 }
 
@@ -47,7 +179,7 @@ func TestBulkIndex(t *testing.T) {
 	ctx, cn := context.WithCancel(context.Background())
 	defer cn()
 
-	index, bulker := SetupIndexWithBulk(ctx, t, testPolicy)
+	index, bulker := SetupIndexWithBulk(ctx, t, testPolicy, WithFlushThresholdCount(1))
 
 	sample := NewRandomSample()
 
@@ -168,6 +300,12 @@ func TestBulkDelete(t *testing.T) {
 
 	data, err := bulker.Read(ctx, index, id)
 	if err != es.ErrElasticNotFound || data != nil {
+		t.Fatal(err)
+	}
+
+	// Attempt to delete again, should not be found
+	err = bulker.Delete(ctx, index, id)
+	if e, ok := err.(*es.ErrElastic); !ok || e.Status != 404 {
 		t.Fatal(err)
 	}
 }

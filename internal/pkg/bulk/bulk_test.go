@@ -20,13 +20,8 @@ import (
 )
 
 // TODO:
-// specify id
-// specify illegal id
-// no body
-// bad body
-// bad index
 // WithREfresh() options
-// cancel ctx works
+// Delete not found?
 
 type stubTransport struct {
 	cb func(*http.Request) (*http.Response, error)
@@ -161,60 +156,170 @@ func (m *mockBulkTransport) Perform(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-/*
-This should be an integration test
-// Test that specified ID is passed through on request
-func TestBulkSpecifyId(t *testing.T) {
-
-	stub := &stubTransport{func(req *http.Request) (*http.Response, error) {
-		return nil, nil
-	}}
-
-	bulker := NewBulker(stub)
-
-	id, err :=
-}
-*/
-
 // API should exit quickly if cancelled.
 // Note: In the real world, the transaction may already be in flight,
 // cancelling a call does not mean the transaction did not occur.
 func TestCancelCtx(t *testing.T) {
 
-	stubCtx, stubCancel := context.WithCancel(context.Background())
-	defer stubCancel()
+	// create a bulker, but don't bother running it
+	bulker := NewBulker(nil)
 
-	stub := &stubTransport{func(req *http.Request) (*http.Response, error) {
-		// Stall on transport; shouldn't affect coming out of the routine.
-		<-stubCtx.Done() // Do not return until test exits
-		return nil, nil
-	}}
+	tests := []struct {
+		name string
+		test func(t *testing.T, ctx context.Context)
+	}{
+		{
+			"create",
+			func(t *testing.T, ctx context.Context) {
+				id, err := bulker.Create(ctx, "testidx", "", []byte(`{"hey":"now"}`))
 
-	ctx, cancelF := context.WithCancel(context.Background())
+				if id != "" {
+					t.Error("Expected empty id on context cancel:", id)
+				}
 
-	id := "notempty"
-	var err error
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"read",
+			func(t *testing.T, ctx context.Context) {
+				data, err := bulker.Read(ctx, "testidx", "11")
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		bulker := NewBulker(stub)
-		bulker.Run(ctx)
-		id, err = bulker.Create(ctx, "testidx", "", []byte(`{"hey":"now"}`))
-	}()
+				if data != nil {
+					t.Error("Expected empty data on context cancel:", data)
+				}
 
-	time.Sleep(time.Millisecond)
-	cancelF()
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"update",
+			func(t *testing.T, ctx context.Context) {
+				err := bulker.Update(ctx, "testidx", "11", []byte(`{"now":"hey"}`))
 
-	wg.Wait()
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"delete",
+			func(t *testing.T, ctx context.Context) {
+				err := bulker.Delete(ctx, "testidx", "11")
 
-	if id != "" {
-		t.Error("Expected empty id on context cancel:", id)
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"index",
+			func(t *testing.T, ctx context.Context) {
+				id, err := bulker.Index(ctx, "testidx", "", []byte(`{"hey":"now"}`))
+
+				if id != "" {
+					t.Error("Expected empty id on context cancel:", id)
+				}
+
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"search",
+			func(t *testing.T, ctx context.Context) {
+				res, err := bulker.Search(ctx, "testidx", []byte(`{"hey":"now"}`))
+
+				if res != nil {
+					t.Error("Expected empty result on context cancel:", res)
+				}
+
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"mcreate",
+			func(t *testing.T, ctx context.Context) {
+				res, err := bulker.MCreate(ctx, []MultiOp{{Index: "testidx", Body: []byte(`{"hey":"now"}`)}})
+
+				if res != nil {
+					t.Error("Expected empty result on context cancel:", res)
+				}
+
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"mindex",
+			func(t *testing.T, ctx context.Context) {
+				res, err := bulker.MIndex(ctx, []MultiOp{{Index: "testidx", Body: []byte(`{"hey":"now"}`)}})
+
+				if res != nil {
+					t.Error("Expected empty result on context cancel:", res)
+				}
+
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"mupdate",
+			func(t *testing.T, ctx context.Context) {
+				res, err := bulker.MUpdate(ctx, []MultiOp{{Index: "testidx", Id: "umm", Body: []byte(`{"hey":"now"}`)}})
+
+				if res != nil {
+					t.Error("Expected empty result on context cancel:", res)
+				}
+
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
+		{
+			"mdelete",
+			func(t *testing.T, ctx context.Context) {
+				res, err := bulker.MDelete(ctx, []MultiOp{{Index: "testidx", Id: "myid"}})
+
+				if res != nil {
+					t.Error("Expected empty result on context cancel:", res)
+				}
+
+				if err != context.Canceled {
+					t.Error("Expected context cancel err: ", err)
+				}
+			},
+		},
 	}
 
-	if err != context.Canceled {
-		t.Error("Expected context cancel err: ", err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			ctx, cancelF := context.WithCancel(context.Background())
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				test.test(t, ctx)
+			}()
+
+			time.Sleep(time.Millisecond)
+			cancelF()
+
+			wg.Wait()
+		})
 	}
 }
 

@@ -118,7 +118,8 @@ func (b *Bulker) flushSearch(ctx context.Context, queue queueT) error {
 	}
 
 	if res.IsError() {
-		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
+		log.Error().Err(err).Str("mod", kModBulk).Msg("Fail writeMsearchBody")
+		return parseError(res)
 	}
 
 	// Reuse buffer

@@ -7,6 +7,8 @@ package bulk
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,10 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
+)
+
+var (
+	ErrNoQuotes = errors.New("Quoted literal not supported")
 )
 
 type MultiOp struct {
@@ -365,7 +371,11 @@ func (b *Bulker) validateIndices(indices []string) error {
 }
 
 func (b *Bulker) validateMeta(index, id string) error {
-	// TODO: validate id and index; not quotes anyhow
+
+	// Quotes on id are legal, but weird.  Disallow for now.
+	if strings.IndexByte(index, '"') != -1 || strings.IndexByte(id, '"') != -1 {
+		return ErrNoQuotes
+	}
 	return nil
 }
 
@@ -399,6 +409,7 @@ func (b *Bulker) dispatch(ctx context.Context, blk *bulkT) respT {
 	select {
 	case resp := <-blk.ch:
 		log.Trace().
+			Err(resp.err).
 			Str("mod", kModBulk).
 			Str("action", blk.action.Str()).
 			Bool("refresh", blk.flags.Has(flagRefresh)).

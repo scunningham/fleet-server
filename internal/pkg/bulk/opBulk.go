@@ -55,7 +55,7 @@ func (b *Bulker) waitBulkAction(ctx context.Context, action actionT, index, id s
 		return nil, err
 	}
 
-	if err := b.writeBulkBody(&blk.buf, body); err != nil {
+	if err := b.writeBulkBody(&blk.buf, action, body); err != nil {
 		return nil, err
 	}
 
@@ -105,11 +105,18 @@ func (b *Bulker) writeBulkMeta(buf *Buf, action, index, id, retry string) error 
 	buf.WriteString(`"_index":"`)
 	buf.WriteString(index)
 	buf.WriteString("\"}}\n")
+
 	return nil
 }
 
-func (b *Bulker) writeBulkBody(buf *Buf, body []byte) error {
+func (b *Bulker) writeBulkBody(buf *Buf, action actionT, body []byte) error {
 	if len(body) == 0 {
+		if action == ActionDelete {
+			return nil
+		}
+
+		// Weird to index, create, or update empty, but will allow
+		buf.WriteString("{}\n")
 		return nil
 	}
 
@@ -186,7 +193,7 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 
 	if res.IsError() {
 		log.Error().Str("mod", kModBulk).Str("err", res.String()).Msg("Fail BulkRequest result")
-		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
+		return parseError(res)
 	}
 
 	// Reuse buffer

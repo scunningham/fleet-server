@@ -9,6 +9,8 @@ import (
 	"fmt"
 )
 
+// TODO: Why do we have both ErrElastic and ErrorT?  Very strange.
+
 type ErrElastic struct {
 	Status int
 	Type   string

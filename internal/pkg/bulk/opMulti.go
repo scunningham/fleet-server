@@ -70,7 +70,7 @@ func (b *Bulker) multiWaitBulkOp(ctx context.Context, action actionT, ops []Mult
 			return nil, err
 		}
 
-		if err := b.writeBulkBody(&bulkBuf, op.Body); err != nil {
+		if err := b.writeBulkBody(&bulkBuf, action, op.Body); err != nil {
 			return nil, err
 		}
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/elastic/fleet-server/v7/internal/pkg/config"
+	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 	"github.com/elastic/fleet-server/v7/internal/pkg/testing/esutil"
 	"github.com/rs/zerolog"
 )
@@ -146,4 +147,22 @@ func QuietLogger() func() {
 	return func() {
 		zerolog.SetGlobalLevel(l)
 	}
+}
+
+func EqualElastic(werr, gerr error) bool {
+	if werr == gerr {
+		return true
+	}
+
+	wantErr, ok1 := werr.(es.ErrElastic)
+	gotErr, ok2 := gerr.(*es.ErrElastic)
+
+	if !ok2 {
+		if tryAgain, ok3 := gerr.(es.ErrElastic); ok3 {
+			gotErr = &tryAgain
+			ok2 = true
+		}
+	}
+
+	return (ok1 && ok2 && wantErr.Status == gotErr.Status && wantErr.Type == gotErr.Type)
 }

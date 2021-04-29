@@ -93,7 +93,7 @@ func (b *Bulker) flushRead(ctx context.Context, queue queueT) error {
 
 	if res.IsError() {
 		log.Error().Str("mod", kModBulk).Str("err", res.String()).Msg("Fail MgetRequest result")
-		return fmt.Errorf("flush: %s", res.String()) // TODO: Wrap error
+		return parseError(res)
 	}
 
 	// Reuse buffer
