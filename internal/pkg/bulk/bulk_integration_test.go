@@ -8,98 +8,18 @@ package bulk
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 
-	"github.com/Pallinder/go-randomdata"
 	"github.com/google/go-cmp/cmp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
-
-const testPolicy = `{
-	"properties": {
-		"intval": {
-			"type": "integer"
-		},
-		"objval": {
-			"type": "object"
-		},
-		"boolval": {
-			"type": "boolean"
-		},
-		"kwval": {
-			"type": "keyword"
-		},
-		"binaryval": {
-			"type": "binary"
-		},
-		"dateval": {
-			"type": "date"
-		}		
-	}
-}`
-
-type subT struct {
-	SubString string `json:"substring"`
-}
-
-type testT struct {
-	IntVal    int    `json:"intval"`
-	ObjVal    subT   `json:"objval"`
-	BoolVal   bool   `json:"boolval"`
-	KWVal     string `json:"kwval"`
-	BinaryVal string `json:"binaryval"`
-	DateVal   string `json:"dateval"`
-}
-
-func NewRandomSample() testT {
-
-	return testT{
-		IntVal:    int(rand.Int31()),
-		ObjVal:    subT{SubString: randomdata.SillyName()},
-		BoolVal:   (rand.Intn(1) == 1),
-		KWVal:     randomdata.SillyName(),
-		BinaryVal: base64.StdEncoding.EncodeToString([]byte(randomdata.SillyName())),
-		DateVal:   time.Now().Format(time.RFC3339),
-	}
-}
-
-func (ts testT) marshal(t testing.TB) []byte {
-	data, err := json.Marshal(&ts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
-func (ts *testT) read(t testing.TB, bulker Bulk, ctx context.Context, index, id string) {
-	data, err := bulker.Read(ctx, index, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = json.Unmarshal(data, ts)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TODO:
-// specify id
-// specify illegal id
-// no body
-// bad body
-// bad index
-// WithREfresh() options
-// cancel ctx works
 
 func TestBulkCreate(t *testing.T) {
 	ctx, cn := context.WithCancel(context.Background())
