@@ -10,14 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -178,11 +177,7 @@ func TestBulkDelete(t *testing.T) {
 
 func benchmarkCreate(n int, b *testing.B) {
 	b.ReportAllocs()
-
-	l := zerolog.GlobalLevel()
-	defer zerolog.SetGlobalLevel(l)
-
-	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	defer (QuietLogger())()
 
 	ctx, cn := context.WithCancel(context.Background())
 	defer cn()
@@ -213,23 +208,27 @@ func benchmarkCreate(n int, b *testing.B) {
 	wait.Wait()
 }
 
-func BenchmarkCreate_1(b *testing.B)     { benchmarkCreate(1, b) }
-func BenchmarkCreate_64(b *testing.B)    { benchmarkCreate(64, b) }
-func BenchmarkCreate_8192(b *testing.B)  { benchmarkCreate(8192, b) }
-func BenchmarkCreate_16384(b *testing.B) { benchmarkCreate(16384, b) }
-func BenchmarkCreate_37268(b *testing.B) { benchmarkCreate(37268, b) }
-func BenchmarkCreate_65536(b *testing.B) { benchmarkCreate(65536, b) }
+func BenchmarkCreate(b *testing.B) {
+
+	benchmarks := []int{1, 64, 8192, 16384, 32768, 65536}
+
+	for _, n := range benchmarks {
+
+		bindFunc := func(n int) func(b *testing.B) {
+			return func(b *testing.B) {
+				benchmarkCreate(n, b)
+			}
+		}
+		b.Run(strconv.Itoa(n), bindFunc(n))
+	}
+}
 
 // This runs a series of CRUD operations through elastic.
 // Not a particularly useful benchmark, but gives some idea of memory overhead.
 
 func benchmarkCRUD(n int, b *testing.B) {
 	b.ReportAllocs()
-
-	l := zerolog.GlobalLevel()
-	defer zerolog.SetGlobalLevel(l)
-
-	zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	defer (QuietLogger())()
 
 	ctx, cn := context.WithCancel(context.Background())
 	defer cn()
@@ -285,9 +284,17 @@ func benchmarkCRUD(n int, b *testing.B) {
 	wait.Wait()
 }
 
-func BenchmarkCRUD_1(b *testing.B)     { benchmarkCRUD(1, b) }
-func BenchmarkCRUD_64(b *testing.B)    { benchmarkCRUD(64, b) }
-func BenchmarkCRUD_8192(b *testing.B)  { benchmarkCRUD(8192, b) }
-func BenchmarkCRUD_16384(b *testing.B) { benchmarkCreate(16384, b) }
-func BenchmarkCRUD_37268(b *testing.B) { benchmarkCreate(37268, b) }
-func BenchmarkCRUD_65536(b *testing.B) { benchmarkCreate(65536, b) }
+func BenchmarkCRUD(b *testing.B) {
+
+	benchmarks := []int{1, 64, 8192, 16384, 32768, 65536}
+
+	for _, n := range benchmarks {
+
+		bindFunc := func(n int) func(b *testing.B) {
+			return func(b *testing.B) {
+				benchmarkCRUD(n, b)
+			}
+		}
+		b.Run(strconv.Itoa(n), bindFunc(n))
+	}
+}

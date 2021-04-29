@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -290,6 +291,17 @@ func benchmarkMockBulk(n int, b *testing.B) {
 	waitBulker.Wait()
 }
 
-func BenchmarkMockBulk_64(b *testing.B) { benchmarkMockBulk(64, b) }
+func BenchmarkMockBulk(b *testing.B) {
 
-//func BenchmarkMockBulk_32768(b *testing.B)    { benchmarkMockBulk(32768, b) }
+	benchmarks := []int{8, 64, 512, 4096, 32768}
+
+	for _, n := range benchmarks {
+
+		bindFunc := func(n int) func(b *testing.B) {
+			return func(b *testing.B) {
+				benchmarkMockBulk(n, b)
+			}
+		}
+		b.Run(strconv.Itoa(n), bindFunc(n))
+	}
+}
