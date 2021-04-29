@@ -8,42 +8,28 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/elastic/fleet-server/v7/internal/pkg/es"
-	"github.com/mailru/easyjson/opt"
 )
 
-type bulkStubInner struct {
-	Status     opt.Int    `json:"status"`
-	DocumentID string     `json:"_id"`
-	Error      *es.ErrorT `json:"error,omitempty"`
-}
-
 type bulkStubItem struct {
-	Index  bulkStubInner `json:"index"`
-	Delete bulkStubInner `json:"delete"`
-	Create bulkStubInner `json:"create"`
-	Update bulkStubInner `json:"update"`
+	Index  *BulkIndexerResponseItem `json:"index"`
+	Delete *BulkIndexerResponseItem `json:"delete"`
+	Create *BulkIndexerResponseItem `json:"create"`
+	Update *BulkIndexerResponseItem `json:"update"`
 }
 
-func (bi bulkStubItem) Choose() BulkIndexerResponseItem {
-	var ptr *bulkStubInner
+func (bi bulkStubItem) Choose() *BulkIndexerResponseItem {
 	switch {
-	case bi.Index.Status.Defined:
-		ptr = &bi.Index
-	case bi.Delete.Status.Defined:
-		ptr = &bi.Delete
-	case bi.Create.Status.Defined:
-		ptr = &bi.Create
-	case bi.Update.Status.Defined:
-		ptr = &bi.Update
-	default:
-		return BulkIndexerResponseItem{}
+	case bi.Update != nil:
+		return bi.Update
+	case bi.Create != nil:
+		return bi.Create
+	case bi.Index != nil:
+		return bi.Index
+	case bi.Delete != nil:
+		return bi.Delete
 	}
 
-	return BulkIndexerResponseItem{
-		ptr.DocumentID,
-		ptr.Status.V,
-		ptr.Error,
-	}
+	return nil
 }
 
 //easyjson:json
@@ -72,47 +58,12 @@ type BulkIndexerResponseItem struct {
 	Error *es.ErrorT `json:"error,omitempty"`
 }
 
-// Elastic returns shape: map[action]BulkIndexerResponseItem.
-// Avoid allocating map; very expensive memory alloc for this
-// case when there is only one legal key.
-func (bi *BulkIndexerResponseItem) UnmarshalJSON(data []byte) error {
-	type innerT struct {
-		DocumentID string     `json:"_id"`
-		Status     int        `json:"status"`
-		Error      *es.ErrorT `json:"error,omitempty"`
+func (b *BulkIndexerResponseItem) deriveError() error {
+	if b == nil {
+		return errors.New("Unknown bulk operator")
 	}
 
-	var w struct {
-		Index  *innerT `json:"index"`
-		Delete *innerT `json:"delete"`
-		Create *innerT `json:"create"`
-		Update *innerT `json:"update"`
-	}
-
-	if err := json.Unmarshal(data, &w); err != nil {
-		return err
-	}
-
-	var v *innerT
-	switch {
-	case w.Index != nil:
-		v = w.Index
-	case w.Delete != nil:
-		v = w.Delete
-	case w.Create != nil:
-		v = w.Create
-	case w.Update != nil:
-		v = w.Update
-	default:
-		return errors.New("unknown bulk action")
-	}
-
-	*bi = BulkIndexerResponseItem{
-		DocumentID: v.DocumentID,
-		Status:     v.Status,
-		Error:      v.Error,
-	}
-	return nil
+	return es.TranslateError(b.Status, b.Error)
 }
 
 //easyjson:json
@@ -161,10 +112,6 @@ type MsearchResponseItem struct {
 type MsearchResponse struct {
 	Responses []MsearchResponseItem `json:"responses"`
 	Took      int                   `json:"took"`
-}
-
-func (b *BulkIndexerResponseItem) deriveError() error {
-	return es.TranslateError(b.Status, b.Error)
 }
 
 func (b *MsearchResponseItem) deriveError() error {

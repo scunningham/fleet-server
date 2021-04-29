@@ -253,7 +253,7 @@ func (b *Bulker) flushBulk(ctx context.Context, queue queueT) error {
 		case n.ch <- respT{
 			err:  item.deriveError(),
 			idx:  n.idx,
-			data: &item,
+			data: item,
 		}:
 		default:
 			panic("Unexpected blocked response channel on flushBulk")

@@ -49,7 +49,7 @@ func easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk(in *jlex
 				in.Delim('[')
 				if out.Items == nil {
 					if !in.IsDelim(']') {
-						out.Items = make([]bulkStubItem, 0, 0)
+						out.Items = make([]bulkStubItem, 0, 2)
 					} else {
 						out.Items = []bulkStubItem{}
 					}
@@ -148,13 +148,45 @@ func easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk1(in *jle
 		}
 		switch key {
 		case "index":
-			easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, &out.Index)
+			if in.IsNull() {
+				in.Skip()
+				out.Index = nil
+			} else {
+				if out.Index == nil {
+					out.Index = new(BulkIndexerResponseItem)
+				}
+				easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, out.Index)
+			}
 		case "delete":
-			easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, &out.Delete)
+			if in.IsNull() {
+				in.Skip()
+				out.Delete = nil
+			} else {
+				if out.Delete == nil {
+					out.Delete = new(BulkIndexerResponseItem)
+				}
+				easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, out.Delete)
+			}
 		case "create":
-			easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, &out.Create)
+			if in.IsNull() {
+				in.Skip()
+				out.Create = nil
+			} else {
+				if out.Create == nil {
+					out.Create = new(BulkIndexerResponseItem)
+				}
+				easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, out.Create)
+			}
 		case "update":
-			easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, &out.Update)
+			if in.IsNull() {
+				in.Skip()
+				out.Update = nil
+			} else {
+				if out.Update == nil {
+					out.Update = new(BulkIndexerResponseItem)
+				}
+				easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in, out.Update)
+			}
 		default:
 			in.SkipRecursive()
 		}
@@ -172,26 +204,42 @@ func easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk1(out *jw
 	{
 		const prefix string = ",\"index\":"
 		out.RawString(prefix[1:])
-		easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, in.Index)
+		if in.Index == nil {
+			out.RawString("null")
+		} else {
+			easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, *in.Index)
+		}
 	}
 	{
 		const prefix string = ",\"delete\":"
 		out.RawString(prefix)
-		easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, in.Delete)
+		if in.Delete == nil {
+			out.RawString("null")
+		} else {
+			easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, *in.Delete)
+		}
 	}
 	{
 		const prefix string = ",\"create\":"
 		out.RawString(prefix)
-		easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, in.Create)
+		if in.Create == nil {
+			out.RawString("null")
+		} else {
+			easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, *in.Create)
+		}
 	}
 	{
 		const prefix string = ",\"update\":"
 		out.RawString(prefix)
-		easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, in.Update)
+		if in.Update == nil {
+			out.RawString("null")
+		} else {
+			easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out, *in.Update)
+		}
 	}
 	out.RawByte('}')
 }
-func easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in *jlexer.Lexer, out *bulkStubInner) {
+func easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in *jlexer.Lexer, out *BulkIndexerResponseItem) {
 	isTopLevel := in.IsStart()
 	if in.IsNull() {
 		if isTopLevel {
@@ -210,10 +258,10 @@ func easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in *jle
 			continue
 		}
 		switch key {
-		case "status":
-			(out.Status).UnmarshalEasyJSON(in)
 		case "_id":
 			out.DocumentID = string(in.String())
+		case "status":
+			out.Status = int(in.Int())
 		case "error":
 			if in.IsNull() {
 				in.Skip()
@@ -234,19 +282,19 @@ func easyjsonCef4e921DecodeGithubComElasticFleetServerV7InternalPkgBulk2(in *jle
 		in.Consumed()
 	}
 }
-func easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out *jwriter.Writer, in bulkStubInner) {
+func easyjsonCef4e921EncodeGithubComElasticFleetServerV7InternalPkgBulk2(out *jwriter.Writer, in BulkIndexerResponseItem) {
 	out.RawByte('{')
 	first := true
 	_ = first
 	{
-		const prefix string = ",\"status\":"
+		const prefix string = ",\"_id\":"
 		out.RawString(prefix[1:])
-		(in.Status).MarshalEasyJSON(out)
+		out.String(string(in.DocumentID))
 	}
 	{
-		const prefix string = ",\"_id\":"
+		const prefix string = ",\"status\":"
 		out.RawString(prefix)
-		out.String(string(in.DocumentID))
+		out.Int(int(in.Status))
 	}
 	if in.Error != nil {
 		const prefix string = ",\"error\":"
