@@ -37,7 +37,7 @@ type mockBulkTransport struct {
 
 // Parse request as ndjson, mock responses
 func (m *mockBulkTransport) Perform(req *http.Request) (*http.Response, error) {
-	log.Info().Msg("perform")
+
 	type shardT struct {
 		Total      int `json:"total"`
 		Successful int `json:"successful"`
@@ -323,7 +323,7 @@ func TestCancelCtx(t *testing.T) {
 	}
 }
 
-func benchmarkMockBulk(n int, b *testing.B) {
+func benchmarkMockBulk(b *testing.B, samples [][]byte) {
 	b.ReportAllocs()
 	defer (QuietLogger())()
 
@@ -333,6 +333,8 @@ func benchmarkMockBulk(n int, b *testing.B) {
 	defer cancelF()
 
 	bulker := NewBulker(mock)
+
+	n := len(samples)
 
 	var waitBulker sync.WaitGroup
 	waitBulker.Add(1)
@@ -355,14 +357,10 @@ func benchmarkMockBulk(n int, b *testing.B) {
 	wait.Add(n)
 	for i := 0; i < n; i++ {
 
-		go func() {
+		go func(sampleData []byte) {
 			defer wait.Done()
 
-			sample := NewRandomSample()
-			sampleData := sample.marshal(b)
-
 			for j := 0; j < b.N; j++ {
-
 				// Create
 				id, err := bulker.Create(ctx, index, "", sampleData)
 				if err != nil {
@@ -388,7 +386,7 @@ func benchmarkMockBulk(n int, b *testing.B) {
 					b.Error(err)
 				}
 			}
-		}()
+		}(samples[i])
 	}
 
 	wait.Wait()
@@ -400,11 +398,25 @@ func BenchmarkMockBulk(b *testing.B) {
 
 	benchmarks := []int{8, 64, 512, 4096, 32768}
 
+	// Create the samples outside the loop to avoid accounting
+	max := 0
+	for _, v := range benchmarks {
+		if max < v {
+			max = v
+		}
+	}
+
+	samples := make([][]byte, 0, max)
+	for i := 0; i < max; i++ {
+		s := NewRandomSample()
+		samples = append(samples, s.marshal(b))
+	}
+
 	for _, n := range benchmarks {
 
 		bindFunc := func(n int) func(b *testing.B) {
 			return func(b *testing.B) {
-				benchmarkMockBulk(n, b)
+				benchmarkMockBulk(b, samples[:n])
 			}
 		}
 		b.Run(strconv.Itoa(n), bindFunc(n))
