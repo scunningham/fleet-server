@@ -35,38 +35,22 @@ type mockBulkTransport struct {
 	b *testing.B
 }
 
-// Parse request as ndjson, mock responses
 func (m *mockBulkTransport) Perform(req *http.Request) (*http.Response, error) {
 
-	type shardT struct {
-		Total      int `json:"total"`
-		Successful int `json:"successful"`
-		Failed     int `json:"failed"`
+	type mockFrameT struct {
+		Index  json.RawMessage `json:"index,omitempty"`
+		Delete json.RawMessage `json:"delete,omitempty"`
+		Create json.RawMessage `json:"create,omitempty"`
+		Update json.RawMessage `json:"update,omitempty"`
 	}
 
-	type innerT struct {
-		Index       string `json:"_index"`
-		Type        string `json:"_type"`
-		Id          string `json:"_id"`
-		Version     int    `json:"_version"`
-		Result      string `json:"result"`
-		Shards      shardT `json:"_shards"`
-		Status      int    `json:"status"`
-		SeqNo       int    `json:"_seq_no"`
-		PrimaryTerm int    `json:"_primary_term"`
+	type mockEmptyT struct {
 	}
 
-	type frameT struct {
-		Index  *innerT `json:"index,omitempty"`
-		Delete *innerT `json:"delete,omitempty"`
-		Create *innerT `json:"create,omitempty"`
-		Update *innerT `json:"update,omitempty"`
-	}
-
-	type emptyT struct {
-	}
+	mockResponse := []byte(`{"index":{"_index":"test","_type":"_doc","_id":"1","_version":1,"result":"created","_shards":{"total":2,"successful":1,"failed":0},"status":201,"_seq_no":0,"_primary_term":1}},`)
 
 	var body bytes.Buffer
+	body.Grow(1024 * 1024)
 
 	// Write framing
 	body.WriteString(`{"items": [`)
@@ -78,57 +62,35 @@ func (m *mockBulkTransport) Perform(req *http.Request) (*http.Response, error) {
 	for decoder.More() {
 		if skip {
 			skip = false
-			var e emptyT
+			var e mockEmptyT
 			if err := decoder.Decode(&e); err != nil {
 				return nil, err
 			}
 		} else {
-			var frame frameT
+			var frame mockFrameT
 			if err := decoder.Decode(&frame); err != nil {
 				return nil, err
 			}
 
 			// Which op
-			var op *innerT
 			switch {
 			case frame.Index != nil:
-				op = frame.Index
 				skip = true
 			case frame.Delete != nil:
-				op = frame.Delete
 			case frame.Create != nil:
-				op = frame.Create
 				skip = true
 			case frame.Update != nil:
-				op = frame.Update
 				skip = true
 			default:
 				return nil, errors.New("Unknown op")
 			}
 
-			type shardT struct {
-				Total      int `json:"total"`
-				Successful int `json:"successful"`
-				Failed     int `json:"failed"`
-			}
-
-			op.Type = "_doc"
-
-			//  mock the following
-			op.Version = 1
-			op.Shards.Total = 1
-			op.Shards.Successful = 1
-			op.Status = 200
-			op.PrimaryTerm = 1
-
-			data, err := json.Marshal(frame)
+			// write mocked response
+			_, err := body.Write(mockResponse)
 
 			if err != nil {
 				return nil, err
 			}
-
-			body.Write(data)
-			body.WriteByte(',')
 
 			cnt += 1
 		}
@@ -366,7 +328,7 @@ func benchmarkMockBulk(b *testing.B, samples [][]byte) {
 				if err != nil {
 					b.Error(err)
 				}
-
+				continue
 				// Index
 				_, err = bulker.Index(ctx, index, id, sampleData)
 				if err != nil {
