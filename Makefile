@@ -11,6 +11,11 @@ BUILDMODE_windows_amd64=-buildmode=pie
 BUILDMODE_darwin_amd64=-buildmode=pie
 BUILDMODE_darwin_arm64=-buildmode=pie
 
+PACKAGE_PATH=./docker/
+DOCKER_BUILD=@export DOCKER_CONTENT_TRUST=1 && export DOCKER_BUILDKIT=1 && docker build --build-arg COMMIT='$(COMMIT)' --build-arg VERSION='$(VERSION)' --build-arg LDFLAGS='$(LDFLAGS)' -f $(PACKAGE_PATH)Dockerfile
+
+
+
 ifeq ($(SNAPSHOT),true)
 VERSION=${DEFAULT_VERSION}-SNAPSHOT
 else
@@ -48,6 +53,11 @@ generate: ## - Generate schema models
 	env GOBIN=${GOBIN} go install github.com/aleksmaus/generate/cmd/schema-generate@latest
 	@printf "${CMD_COLOR_ON} Running go generate\n${CMD_COLOR_OFF}"
 	env PATH=${GOBIN}:${PATH} go generate ./...
+
+.PHONY: docker
+docker:	## - Build the elastic fleet docker images
+	@printf "${CMD_COLOR_ON} Build the elastic fleet docker image\n${CMD_COLOR_OFF}"
+	${DOCKER_BUILD} --ssh default --target builder  .
 
 .PHONY: check
 check: ## - Run all checks
